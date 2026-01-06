@@ -1,0 +1,444 @@
+import React, {useEffect, useRef, useState} from 'react';
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  StyleSheet,
+  Modal,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Easing,
+} from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import {launchImageLibrary} from 'react-native-image-picker';
+import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
+
+const Header = ({user, onNotificationPress, onProfileUpdate}) => {
+  const notificationCount = 0;
+  const [profileVisible, setProfileVisible] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const [draftPhoto, setDraftPhoto] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [photoPreviewVisible, setPhotoPreviewVisible] = useState(false);
+  const [anchor, setAnchor] = useState({x: 0, y: 0, width: 40, height: 40});
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const avatarRef = useRef(null);
+  const {width: screenWidth} = Dimensions.get('window');
+  const targetWidth = Math.min(screenWidth - spacing.lg * 2, 360);
+  const translateY = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-12, 0],
+  });
+  const cardTop = Math.max(spacing.md, anchor.y + anchor.height + spacing.xs);
+  const maxLeft = Math.max(spacing.md, screenWidth - targetWidth - spacing.md);
+  const cardLeft = Math.min(Math.max(spacing.md, anchor.x), maxLeft);
+
+  useEffect(() => {
+    if (!profileVisible) {
+      return;
+    }
+    setDraftName(user?.displayName || '');
+    setDraftPhoto(user?.photoURL || '');
+  }, [profileVisible, user]);
+
+  const openProfile = () => {
+    const animateOpen = () => {
+      slideAnim.setValue(0);
+      Animated.timing(slideAnim, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    };
+
+    if (avatarRef.current?.measureInWindow) {
+      avatarRef.current.measureInWindow((x, y, width, height) => {
+        setAnchor({x, y, width, height});
+        setProfileVisible(true);
+        requestAnimationFrame(animateOpen);
+      });
+      return;
+    }
+
+    setProfileVisible(true);
+    requestAnimationFrame(animateOpen);
+  };
+
+  const closeProfile = () => {
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setPhotoPreviewVisible(false);
+      setProfileVisible(false);
+    });
+  };
+
+  const handlePickImage = async () => {
+    try {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        selectionLimit: 1,
+      });
+      if (result.didCancel) {
+        return;
+      }
+      const uri = result.assets?.[0]?.uri;
+      if (uri) {
+        setDraftPhoto(uri);
+      }
+    } catch (error) {
+      console.error('Failed to pick image:', error);
+      Alert.alert('Error', 'Failed to open photo library.');
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!draftName.trim()) {
+      Alert.alert('Error', 'Please enter a name');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (onProfileUpdate) {
+        const result = await onProfileUpdate({
+          displayName: draftName.trim(),
+          photoURL: draftPhoto || '',
+        });
+        if (result?.success === false) {
+          Alert.alert('Error', result.message || 'Failed to update profile');
+          return;
+        }
+      }
+      closeProfile();
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      Alert.alert('Error', 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openPhotoPreview = () => {
+    if (!draftPhoto) {
+      return;
+    }
+    setPhotoPreviewVisible(true);
+  };
+
+  return (
+    <View style={styles.container}>
+      <TouchableOpacity
+        style={styles.leftSection}
+        onPress={openProfile}
+        activeOpacity={0.7}>
+        <View ref={avatarRef} collapsable={false}>
+          {user?.photoURL ? (
+            <Image source={{uri: user.photoURL}} style={styles.userImage} />
+          ) : (
+            <View style={styles.userIconContainer}>
+              <Icon name="person" size={24} color={colors.white} />
+            </View>
+          )}
+        </View>
+        <Text style={styles.userName} numberOfLines={1}>
+          {user?.displayName || 'User'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.notificationButton}
+        onPress={onNotificationPress}>
+        <Icon name="notifications-outline" size={24} color={colors.text.primary} />
+        {notificationCount > 0 && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>
+              {notificationCount > 99 ? '99+' : notificationCount}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <Modal
+        visible={profileVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeProfile}>
+        <View style={styles.modalRoot}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={closeProfile}
+            style={styles.modalBackdrop}
+          />
+          <Animated.View
+            style={[
+              styles.modalCard,
+              {
+                top: cardTop,
+                left: cardLeft,
+                width: targetWidth,
+                transform: [{translateY}],
+              },
+            ]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Profile</Text>
+              <TouchableOpacity
+                style={styles.modalClose}
+                onPress={closeProfile}>
+                <Icon name="close" size={18} color={colors.text.secondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.photoWrapper}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={openPhotoPreview}>
+                {draftPhoto ? (
+                  <Image source={{uri: draftPhoto}} style={styles.profileImage} />
+                ) : (
+                  <View style={styles.profilePlaceholder}>
+                    <Icon name="person" size={40} color={colors.white} />
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.photoEditButton}
+                onPress={handlePickImage}>
+                <Icon name="pencil" size={16} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.inputLabel}>Name</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={draftName}
+              onChangeText={setDraftName}
+              placeholder="Enter your name"
+              editable={!saving}
+            />
+            <TouchableOpacity
+              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+              onPress={handleSaveProfile}
+              disabled={saving}>
+              {saving ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.saveButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={photoPreviewVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoPreviewVisible(false)}>
+        <View style={styles.previewOverlay}>
+          <TouchableOpacity
+            style={styles.previewBackdrop}
+            activeOpacity={1}
+            onPress={() => setPhotoPreviewVisible(false)}
+          />
+          {draftPhoto ? (
+            <Image
+              source={{uri: draftPhoto}}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          ) : null}
+          <TouchableOpacity
+            style={styles.previewClose}
+            onPress={() => setPhotoPreviewVisible(false)}>
+            <Icon name="close" size={18} color={colors.white} />
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.headerBg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    elevation: 2,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  leftSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  userImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: spacing.sm,
+  },
+  userIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  userName: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  notificationButton: {
+    padding: spacing.sm,
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: colors.error,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+  },
+  modalRoot: {
+    flex: 1,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  modalCard: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: spacing.md,
+    elevation: 6,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    position: 'absolute',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  modalClose: {
+    padding: 4,
+  },
+  photoWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+  },
+  profilePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoEditButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.text.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.sm,
+  },
+  inputLabel: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  nameInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    fontSize: fontSize.regular,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+  },
+  saveButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
+  },
+  saveButtonText: {
+    color: colors.white,
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.semibold,
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewClose: {
+    position: 'absolute',
+    top: spacing.lg,
+    right: spacing.lg,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
+
+export default Header;

@@ -1,4 +1,4 @@
-package com.accountapp
+package com.jasmeet.accountapp
 
 import android.app.Application
 import com.facebook.react.PackageList

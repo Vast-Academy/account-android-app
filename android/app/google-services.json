@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "787026486912",
+    "project_id": "account-app-1befd",
+    "storage_bucket": "account-app-1befd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:787026486912:android:fa1c64c8b6be742379e865",
+        "android_client_info": {
+          "package_name": "com.jasmeet.accountapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "787026486912-fa73d4tc8s8c95mvth0bmoml8meohpda.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jasmeet.accountapp",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "787026486912-0od795pc1mv0tffcu13usmq73i0vvvkv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBsKNFxiG_alDFrP0aOKRpWdw-dTZ2Dj7M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "787026486912-0od795pc1mv0tffcu13usmq73i0vvvkv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
