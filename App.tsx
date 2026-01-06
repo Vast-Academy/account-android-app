@@ -1,6 +1,6 @@
 /**
  * Account Android App
- * Main App Entry Point
+ * Main App Entry Point jasmeet
  */
 
 import React, { useEffect } from 'react';
