@@ -144,7 +144,7 @@ const Header = ({user, onBackupPress, onProfileUpdate}) => {
             <Image source={{uri: user.photoURL}} style={styles.userImage} />
           ) : (
             <View style={styles.userIconContainer}>
-              <Icon name="person" size={32} color={colors.white} />
+              <Icon name="person" size={24} color={colors.white} />
             </View>
           )}
         </View>
@@ -297,14 +297,14 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   userImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   userIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',

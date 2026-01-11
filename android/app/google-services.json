@@ -14,11 +14,27 @@
       },
       "oauth_client": [
         {
+          "client_id": "787026486912-amld994giuivu6vt5up29rg2038fvnlq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jasmeet.accountapp",
+            "certificate_hash": "a7de8ff5458632706bd8627e2e68f8eeda103302"
+          }
+        },
+        {
           "client_id": "787026486912-fa73d4tc8s8c95mvth0bmoml8meohpda.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.jasmeet.accountapp",
             "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "787026486912-uldep9kaj8ro9kd5d5kjodn40deomc01.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jasmeet.accountapp",
+            "certificate_hash": "64705050cc938fea236ddfe05b35a7a5af64380e"
           }
         },
         {

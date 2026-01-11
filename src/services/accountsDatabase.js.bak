@@ -229,19 +229,6 @@ export const deleteAccountAndTransactions = async (id) => {
   }
 };
 
-// Clear all accounts data
-export const clearAllAccountsData = async () => {
-  try {
-    const db = getDB();
-    db.execute('DELETE FROM accounts');
-    console.log('All accounts data cleared successfully.');
-    return {success: true};
-  } catch (error) {
-    console.error('Failed to clear all accounts data:', error);
-    throw error;
-  }
-};
-
 
 // Update account balance
 export const updateAccountBalance = async (id, newBalance) => {

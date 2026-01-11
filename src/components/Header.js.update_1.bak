@@ -139,12 +139,21 @@ const Header = ({user, onBackupPress, onProfileUpdate}) => {
         style={styles.leftSection}
         onPress={openProfile}
         activeOpacity={0.7}>
-        <View ref={avatarRef} collapsable={false}>
-          {user?.photoURL ? (
-            <Image source={{uri: user.photoURL}} style={styles.userImage} />
-          ) : (
-            <View style={styles.userIconContainer}>
-              <Icon name="person" size={32} color={colors.white} />
+        <View style={styles.avatarColumn}>
+          <View ref={avatarRef} collapsable={false}>
+            {user?.photoURL ? (
+              <Image source={{uri: user.photoURL}} style={styles.userImage} />
+            ) : (
+              <View style={styles.userIconContainer}>
+                <Icon name="person" size={24} color={colors.white} />
+              </View>
+            )}
+          </View>
+          {!!user?.occupation && (
+            <View style={styles.occupationBadge}>
+              <Text style={styles.occupationText} numberOfLines={1}>
+                {user.occupation}
+              </Text>
             </View>
           )}
         </View>
@@ -152,13 +161,8 @@ const Header = ({user, onBackupPress, onProfileUpdate}) => {
           <Text style={styles.userName} numberOfLines={1}>
             {user?.displayName || 'User'}
           </Text>
-          {!!user?.occupation && (
-            <Text style={styles.userSecondaryText} numberOfLines={1}>
-              {user.occupation}
-            </Text>
-          )}
           {!!user?.username && (
-            <Text style={styles.userSecondaryText} numberOfLines={1}>
+            <Text style={styles.userUsername} numberOfLines={1}>
               @{user.username}
             </Text>
           )}
@@ -292,19 +296,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  avatarColumn: {
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
   userInfo: {
     flex: 1,
-    marginLeft: spacing.md,
+    marginRight: spacing.sm,
   },
   userImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   userIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -314,10 +322,25 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: colors.text.primary,
   },
-  userSecondaryText: {
+  userUsername: {
     fontSize: fontSize.small,
     color: colors.text.secondary,
     marginTop: spacing.xs,
+  },
+  occupationBadge: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    borderRadius: 0,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 4,
+    maxWidth: 160,
+  },
+  occupationText: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    fontWeight: fontWeight.medium,
   },
   backupButton: {
     padding: spacing.sm,

@@ -1,7 +1,6 @@
 import React, { useEffect, useCallback } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { checkAuthStatus } from '../utils/tokenManager';
-import { isSetupComplete } from '../services/userSetup'; // Import isSetupComplete
 
 const SplashScreen = ({ navigation }) => {
   const checkAuthentication = useCallback(async () => {
@@ -13,16 +12,8 @@ const SplashScreen = ({ navigation }) => {
       const authStatus = await checkAuthStatus();
 
       if (authStatus.isAuthenticated) {
-        // Check if initial setup is complete (e.g., first earning account created)
-        const setupCompleted = isSetupComplete();
-
-        if (!setupCompleted) {
-          // User is logged in but setup not complete, go to Home with tutorial flag
-          navigation.replace('Home', { user: authStatus.user, showTutorial: true });
-        } else {
-          // User is logged in and setup complete, go to Home normally
-          navigation.replace('Home', { user: authStatus.user, showTutorial: false });
-        }
+        // User is logged in, go to Home
+        navigation.replace('Home', { user: authStatus.user });
       } else {
         // User not logged in, go to Login
         navigation.replace('Login');

@@ -249,7 +249,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
               <TextInput
                 ref={accountNameInputRef}
                 style={styles.input}
-                placeholder="Account Name (e.g., Salary, Savings)"
+                placeholder="Account Name"
                 placeholderTextColor={colors.text.secondary}
                 value={accountName}
                 onChangeText={setAccountName}
@@ -601,10 +601,6 @@ const styles = StyleSheet.create({
     borderColor: colors.white,
     elevation: 4,
     transform: [{scale: 1.1}],
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 4},
   },
   buttonContainer: {
     marginTop: spacing.xs,

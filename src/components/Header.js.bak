@@ -14,7 +14,6 @@ import {
   Easing,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import Feather from 'react-native-vector-icons/Feather';
 import {launchImageLibrary} from 'react-native-image-picker';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 
@@ -144,32 +143,19 @@ const Header = ({user, onBackupPress, onProfileUpdate}) => {
             <Image source={{uri: user.photoURL}} style={styles.userImage} />
           ) : (
             <View style={styles.userIconContainer}>
-              <Icon name="person" size={32} color={colors.white} />
+              <Icon name="person" size={24} color={colors.white} />
             </View>
           )}
         </View>
-        <View style={styles.userInfo}>
-          <Text style={styles.userName} numberOfLines={1}>
-            {user?.displayName || 'User'}
-          </Text>
-          {!!user?.occupation && (
-            <Text style={styles.userSecondaryText} numberOfLines={1}>
-              {user.occupation}
-            </Text>
-          )}
-          {!!user?.username && (
-            <Text style={styles.userSecondaryText} numberOfLines={1}>
-              @{user.username}
-            </Text>
-          )}
-        </View>
+        <Text style={styles.userName} numberOfLines={1}>
+          {user?.displayName || 'User'}
+        </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.backupButton}
         onPress={onBackupPress}>
-        <Feather name="refresh-ccw" size={20} color={colors.text.primary} />
-        <Text style={styles.backupLabel}>Backup</Text>
+        <Icon name="save-outline" size={24} color={colors.text.primary} />
       </TouchableOpacity>
 
 
@@ -292,44 +278,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  userInfo: {
-    flex: 1,
-    marginLeft: spacing.md,
-  },
   userImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: spacing.sm,
   },
   userIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: spacing.sm,
   },
   userName: {
     fontSize: fontSize.large,
     fontWeight: fontWeight.semibold,
     color: colors.text.primary,
-  },
-  userSecondaryText: {
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-    marginTop: spacing.xs,
+    flex: 1,
   },
   backupButton: {
     padding: spacing.sm,
     position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backupLabel: {
-    marginLeft: spacing.xs,
-    fontSize: fontSize.small,
-    color: colors.text.primary,
-    fontWeight: fontWeight.medium,
   },
   badge: {
     position: 'absolute',

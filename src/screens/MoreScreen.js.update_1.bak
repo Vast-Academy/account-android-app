@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import {useFocusEffect} from '@react-navigation/native';
 import {
   View,
@@ -18,14 +18,11 @@ import {
   TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import ImagePicker from 'react-native-image-crop-picker';
+import {launchImageLibrary} from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {auth} from '../config/firebase';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
-import { clearLocalData } from '../services/database';
-import { clearAllAccountsData } from '../services/accountsDatabase';
-import { clearAllLedgerData } from '../services/ledgerDatabase';
 
 const OCCUPATION_OPTIONS = [
   {label: 'Business Owner', value: 'Business Owner'},
@@ -117,21 +114,6 @@ const OCCUPATION_OPTIONS = [
   {label: 'Other (Manual)', value: 'manual'},
 ];
 
-const normalizeImageUri = uri => {
-  if (!uri) {
-    return '';
-  }
-  if (
-    uri.startsWith('http://') ||
-    uri.startsWith('https://') ||
-    uri.startsWith('file://') ||
-    uri.startsWith('content://')
-  ) {
-    return uri;
-  }
-  return `file://${uri}`;
-};
-
 const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const routeUser = route.params?.user;
   const [currentUser, setCurrentUser] = React.useState(
@@ -141,8 +123,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const [draftName, setDraftName] = React.useState('');
   const [draftPhoto, setDraftPhoto] = React.useState('');
   const [draftDob, setDraftDob] = React.useState('');
-  const [draftPhoneNumber, setDraftPhoneNumber] = React.useState('');
-  const [draftGender, setDraftGender] = React.useState('');
   const [occupationChoice, setOccupationChoice] = React.useState('');
   const [manualOccupation, setManualOccupation] = React.useState('');
   const [occupationModalVisible, setOccupationModalVisible] =
@@ -153,9 +133,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const screenWidth = Dimensions.get('window').width;
   const profileSlideX = React.useRef(new Animated.Value(screenWidth)).current;
   const isSlidingRef = React.useRef(false);
-  const skipNextSlideInRef = React.useRef(false);
-  const profileVisibleRef = React.useRef(false);
-  const profileBackRef = React.useRef(() => {});
   const panResponder = React.useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
@@ -163,22 +140,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
         return Math.abs(dx) > Math.abs(dy) && dx > 10;
       },
       onPanResponderGrant: () => {
-        if (!profileVisibleRef.current) {
-          slideX.stopAnimation();
-        }
+        slideX.stopAnimation();
       },
       onPanResponderMove: (_evt, gestureState) => {
-        if (profileVisibleRef.current) {
-          return;
-        }
         const nextValue = Math.max(0, Math.min(screenWidth, gestureState.dx));
         slideX.setValue(nextValue);
       },
       onPanResponderRelease: (_evt, gestureState) => {
-        if (profileVisibleRef.current) {
-          profileBackRef.current();
-          return;
-        }
         const shouldClose =
           gestureState.dx > screenWidth * 0.25 || gestureState.vx > 0.6;
         if (shouldClose) {
@@ -193,9 +161,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
         }).start();
       },
       onPanResponderTerminate: () => {
-        if (profileVisibleRef.current) {
-          return;
-        }
         Animated.timing(slideX, {
           toValue: 0,
           duration: 180,
@@ -205,35 +170,12 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       },
     }),
   ).current;
-  const profilePanResponder = React.useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        const {dx, dy} = gestureState;
-        return Math.abs(dx) > Math.abs(dy) && dx > 10;
-      },
-      onPanResponderRelease: (_evt, gestureState) => {
-        const shouldClose =
-          gestureState.dx > screenWidth * 0.25 || gestureState.vx > 0.6;
-        if (shouldClose) {
-          profileBackRef.current();
-        }
-      },
-    }),
-  ).current;
 
   React.useEffect(() => {
     if (user || routeUser) {
       setCurrentUser(user || routeUser);
     }
   }, [user, routeUser]);
-
-  React.useEffect(() => {
-    profileVisibleRef.current = profileVisible;
-  }, [profileVisible]);
-
-  React.useEffect(() => {
-    profileBackRef.current = handleProfileBack;
-  }, [handleProfileBack]);
 
   React.useEffect(() => {
     const loadUser = async () => {
@@ -259,11 +201,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     };
     const handleFocus = () => {
       loadUser();
-      if (skipNextSlideInRef.current) {
-        skipNextSlideInRef.current = false;
-        slideX.setValue(0);
-        return;
-      }
       runSlideIn();
     };
     const unsubscribe = navigation.addListener('focus', handleFocus);
@@ -277,20 +214,18 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       {
         text: 'Logout',
         style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await auth().signOut();
-                      await GoogleSignin.signOut();
-                      await AsyncStorage.clear();
-                      await clearLocalData();
-                      await clearAllAccountsData();
-                      await clearAllLedgerData();
-                      navigation.replace('Login');
-                    } catch (error) {
-                      console.error('Logout error:', error);
-                      Alert.alert('Error', 'Failed to logout');
-                    }
-                  },      },
+        onPress: async () => {
+          try {
+            await auth().signOut();
+            await GoogleSignin.signOut();
+            await AsyncStorage.clear();
+            navigation.replace('Login');
+          } catch (error) {
+            console.error('Logout error:', error);
+            Alert.alert('Error', 'Failed to logout');
+          }
+        },
+      },
     ]);
   };
 
@@ -310,10 +245,8 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       setManualOccupation('');
     }
     setDraftName(currentUser?.displayName || '');
-    setDraftPhoto(normalizeImageUri(currentUser?.photoURL || ''));
+    setDraftPhoto(currentUser?.photoURL || '');
     setDraftDob(currentUser?.dob || '');
-    setDraftPhoneNumber(currentUser?.phoneNumber || '');
-    setDraftGender(currentUser?.gender || '');
     setProfileVisible(true);
     profileSlideX.setValue(screenWidth);
     Animated.timing(profileSlideX, {
@@ -346,24 +279,18 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
 
   const handlePickImage = async () => {
     try {
-      const result = await ImagePicker.openPicker({
+      const result = await launchImageLibrary({
         mediaType: 'photo',
-        cropping: true,
-        freeStyleCropEnabled: true,
-        cropperToolbarTitle: 'Crop Photo',
-        cropperActiveWidgetColor: colors.primary,
-        cropperStatusBarColor: colors.primary,
-        cropperToolbarColor: colors.primary,
-        cropperToolbarWidgetColor: colors.white,
-        compressImageQuality: 0.9,
+        selectionLimit: 1,
       });
-      if (result?.path) {
-        setDraftPhoto(normalizeImageUri(result.path));
-      }
-    } catch (error) {
-      if (error?.code === 'E_PICKER_CANCELLED') {
+      if (result.didCancel) {
         return;
       }
+      const uri = result.assets?.[0]?.uri;
+      if (uri) {
+        setDraftPhoto(uri);
+      }
+    } catch (error) {
       console.error('Failed to pick image:', error);
       Alert.alert('Error', 'Failed to open photo library.');
     }
@@ -380,15 +307,12 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
         occupationChoice === 'manual'
           ? manualOccupation.trim()
           : occupationChoice;
-      const normalizedPhoto = normalizeImageUri(draftPhoto || '');
       if (onProfileUpdate) {
         const result = await onProfileUpdate({
           displayName: draftName.trim(),
-          photoURL: normalizedPhoto,
+          photoURL: draftPhoto || '',
           occupation: occupationValue || '',
           dob: draftDob.trim(),
-          phoneNumber: draftPhoneNumber.trim(),
-          gender: draftGender,
         });
         if (result?.success === false) {
           Alert.alert('Error', result.message || 'Failed to update profile');
@@ -397,18 +321,16 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       } else if (auth().currentUser) {
         await auth().currentUser.updateProfile({
           displayName: draftName.trim(),
-          photoURL: normalizedPhoto,
+          photoURL: draftPhoto || '',
         });
       }
 
       const updatedUser = {
         ...(currentUser || {}),
         displayName: draftName.trim(),
-        photoURL: normalizedPhoto,
+        photoURL: draftPhoto || '',
         dob: draftDob.trim(),
         occupation: occupationValue || '',
-        phoneNumber: draftPhoneNumber.trim(),
-        gender: draftGender,
       };
       setCurrentUser(updatedUser);
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
@@ -421,63 +343,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     }
   };
 
-  const getDraftOccupationValue = () => {
-    return occupationChoice === 'manual'
-      ? manualOccupation.trim()
-      : occupationChoice;
-  };
-
-  const hasProfileChanges = () => {
-    const nameChanged =
-      draftName.trim() !== String(currentUser?.displayName || '').trim();
-    const photoChanged =
-      normalizeImageUri(draftPhoto || '') !==
-      normalizeImageUri(currentUser?.photoURL || '');
-    const dobChanged =
-      draftDob.trim() !== String(currentUser?.dob || '').trim();
-    const phoneChanged =
-      draftPhoneNumber.trim() !== String(currentUser?.phoneNumber || '').trim();
-    const genderChanged =
-      draftGender !== String(currentUser?.gender || '');
-    const occupationChanged =
-      getDraftOccupationValue() !== String(currentUser?.occupation || '');
-    return (
-      nameChanged ||
-      photoChanged ||
-      dobChanged ||
-      phoneChanged ||
-      genderChanged ||
-      occupationChanged
-    );
-  };
-
-  const handleProfileBack = React.useCallback(() => {
-    if (!profileVisible) {
-      return;
-    }
-    if (!hasProfileChanges()) {
-      closeProfile();
-      return;
-    }
-    Alert.alert('Discard changes?', 'Do you want to save your changes?', [
-      {text: 'Cancel', style: 'cancel'},
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: () => {
-          closeProfile();
-        },
-      },
-      {
-        text: 'Save',
-        onPress: () => {
-          handleSaveProfile();
-        },
-      },
-    ]);
-  }, [profileVisible, hasProfileChanges, closeProfile, handleSaveProfile]);
-
   const menuItems = [
+    {
+      id: 'profile',
+      title: 'Profile',
+      icon: 'person-outline',
+      onPress: openProfile,
+    },
     {
       id: 'backup',
       title: 'Backup & Restore',
@@ -489,10 +361,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       id: 'settings',
       title: 'Settings',
       icon: 'settings-outline',
-      onPress: () => {
-        skipNextSlideInRef.current = true;
-        navigation.navigate('Settings');
-      },
+      onPress: () => navigation.navigate('Settings'),
     },
     {
       id: 'help',
@@ -533,7 +402,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     React.useCallback(() => {
       const onBackPress = () => {
         if (profileVisible) {
-          handleProfileBack();
+          closeProfile();
           return true;
         }
         handleBack();
@@ -544,22 +413,8 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
         onBackPress,
       );
       return () => subscription.remove();
-    }, [handleBack, profileVisible, handleProfileBack]),
+    }, [handleBack, profileVisible, closeProfile]),
   );
-
-  // Handle gesture-based back navigation (swipe from edge)
-  useEffect(() => {
-    const unsubscribeNavigation = navigation.addListener('beforeRemove', (e) => {
-      if (profileVisibleRef.current) {
-        e.preventDefault();
-        profileBackRef.current();
-      }
-    });
-    return unsubscribeNavigation;
-  }, [navigation]);
-
-  const profilePhotoUri = normalizeImageUri(currentUser?.photoURL || '');
-  const draftPhotoUri = normalizeImageUri(draftPhoto || '');
 
   return (
     <View style={styles.container}>
@@ -577,15 +432,10 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
           <View style={styles.moreHeaderSpacer} />
         </View>
         <ScrollView style={styles.scrollView}>
-          <TouchableOpacity
-            style={styles.profileSection}
-            onPress={openProfile}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel="Open profile settings">
-            {profilePhotoUri ? (
+          <View style={styles.profileSection}>
+            {currentUser?.photoURL ? (
               <Image
-                source={{uri: profilePhotoUri}}
+                source={{uri: currentUser.photoURL}}
                 style={styles.profileImage}
               />
             ) : (
@@ -604,13 +454,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 </Text>
               )}
             </View>
-            <Icon
-              name="chevron-forward"
-              size={20}
-              color={colors.text.light}
-              style={styles.profileArrow}
-            />
-          </TouchableOpacity>
+          </View>
 
           <View style={styles.menuSection}>
             {menuItems.map(item => (
@@ -640,12 +484,11 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
           style={[
             styles.profileScreen,
             {transform: [{translateX: profileSlideX}]},
-          ]}
-          {...profilePanResponder.panHandlers}>
+          ]}>
           <View style={styles.profileHeader}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={handleProfileBack}
+              onPress={closeProfile}
               accessibilityLabel="Close profile settings">
               <Icon name="chevron-back" size={22} color={colors.text.primary} />
             </TouchableOpacity>
@@ -660,9 +503,9 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 style={styles.profileImageButton}
                 onPress={openPhotoPreview}
                 activeOpacity={0.8}>
-                {draftPhotoUri ? (
+                {draftPhoto ? (
                   <Image
-                    source={{uri: draftPhotoUri}}
+                    source={{uri: draftPhoto}}
                     style={styles.profileHeroImage}
                   />
                 ) : (
@@ -679,20 +522,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.profileLabel}>Username</Text>
-            <TextInput
-              style={[styles.profileInput, styles.profileInputDisabled]}
-              value={currentUser?.username || ''}
-              editable={false}
-            />
-
-            <Text style={styles.profileLabel}>Email</Text>
-            <TextInput
-              style={[styles.profileInput, styles.profileInputDisabled]}
-              value={currentUser?.email || ''}
-              editable={false}
-            />
-
             <Text style={styles.profileLabel}>Name</Text>
             <TextInput
               style={styles.profileInput}
@@ -702,35 +531,15 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               editable={!saving}
             />
 
-            <Text style={styles.profileLabel}>Phone Number</Text>
+            <Text style={styles.profileLabel}>DOB</Text>
             <TextInput
               style={styles.profileInput}
-              value={draftPhoneNumber}
-              onChangeText={setDraftPhoneNumber}
-              placeholder="Enter your phone number"
-              keyboardType="phone-pad"
+              value={draftDob}
+              onChangeText={setDraftDob}
+              placeholder="DD/MM/YYYY"
+              keyboardType="numbers-and-punctuation"
               editable={!saving}
             />
-
-            <Text style={styles.profileLabel}>Gender</Text>
-            <TouchableOpacity
-              style={styles.occupationPicker}
-              onPress={() => {
-                Alert.alert('Gender', 'Select your gender', [
-                  {text: 'Male', onPress: () => setDraftGender('Male')},
-                  {text: 'Female', onPress: () => setDraftGender('Female')},
-                  {text: 'Other', onPress: () => setDraftGender('Other')},
-                ]);
-              }}>
-              <Text style={styles.occupationPickerText}>
-                {draftGender || 'Select gender'}
-              </Text>
-              <Icon
-                name="chevron-down"
-                size={18}
-                color={colors.text.secondary}
-              />
-            </TouchableOpacity>
 
             <Text style={styles.profileLabel}>Occupation</Text>
             <TouchableOpacity
@@ -771,20 +580,20 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               )}
             </TouchableOpacity>
           </ScrollView>
-      <Modal
-        visible={photoPreviewVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPhotoPreviewVisible(false)}>
+          <Modal
+            visible={photoPreviewVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setPhotoPreviewVisible(false)}>
             <View style={styles.previewOverlay}>
               <TouchableOpacity
                 style={styles.previewBackdrop}
                 activeOpacity={1}
                 onPress={() => setPhotoPreviewVisible(false)}
               />
-              {draftPhotoUri ? (
+              {draftPhoto ? (
                 <Image
-                  source={{uri: draftPhotoUri}}
+                  source={{uri: draftPhoto}}
                   style={styles.previewImage}
                   resizeMode="contain"
                 />
@@ -893,9 +702,6 @@ const styles = StyleSheet.create({
   profileInfo: {
     flex: 1,
     marginLeft: spacing.md,
-  },
-  profileArrow: {
-    marginLeft: spacing.sm,
   },
   profileImage: {
     width: 56,
@@ -1035,29 +841,23 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   profileInput: {
-    borderWidth: 0,
-    borderBottomWidth: 1,
+    borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
     fontSize: fontSize.regular,
     color: colors.text.primary,
     marginBottom: spacing.md,
-    backgroundColor: 'transparent',
-  },
-  profileInputDisabled: {
-    color: colors.text.secondary,
-    opacity: 0.8,
+    backgroundColor: colors.white,
   },
   occupationPicker: {
-    borderWidth: 0,
-    borderBottomWidth: 1,
+    borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 10,
-    backgroundColor: 'transparent',
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    backgroundColor: colors.white,
     marginBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1070,19 +870,17 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   profileSaveButton: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.primary,
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
   },
   profileSaveButtonDisabled: {
     opacity: 0.7,
   },
   profileSaveText: {
-    color: colors.primary,
+    color: colors.white,
     fontSize: fontSize.regular,
     fontWeight: fontWeight.semibold,
   },

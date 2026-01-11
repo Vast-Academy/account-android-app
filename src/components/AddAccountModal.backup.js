@@ -6,8 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
-  Keyboard,
-  ScrollView,
   StyleSheet,
   Alert,
   ActivityIndicator,
@@ -64,9 +62,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
   const [selectedColor, setSelectedColor] = React.useState(
     ACCOUNT_COLORS[0].value,
   );
-  const [keyboardPadding, setKeyboardPadding] = React.useState(0);
   const slideAnim = React.useRef(new Animated.Value(0)).current;
-  const accountNameInputRef = React.useRef(null);
 
   React.useEffect(() => {
     if (visible) {
@@ -75,11 +71,6 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
       setSelectedIcon(ACCOUNT_ICONS[0].name);
       setSelectedColor(ACCOUNT_COLORS[0].value);
       checkEarningAccounts();
-
-      // Focus the input after the animation is complete
-      setTimeout(() => {
-        accountNameInputRef.current?.focus();
-      }, 400);
     }
   }, [visible]);
 
@@ -95,22 +86,6 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
       slideAnim.setValue(0);
     }
   }, [slideAnim, visible]);
-
-  React.useEffect(() => {
-    if (Platform.OS !== 'android') {
-      return undefined;
-    }
-    const showListener = Keyboard.addListener('keyboardDidShow', event => {
-      setKeyboardPadding(event.endCoordinates.height);
-    });
-    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardPadding(0);
-    });
-    return () => {
-      showListener.remove();
-      hideListener.remove();
-    };
-  }, []);
 
   const checkEarningAccounts = () => {
     try {
@@ -149,9 +124,6 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
       return;
     }
     setAccountType(newType);
-    if (newType === 'liability') {
-      setIsPrimary(false);
-    }
   };
 
   const handleSave = async () => {
@@ -190,14 +162,6 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
     outputRange: [height, 0],
   });
 
-  // Dynamic modal container style based on keyboard visibility
-  const modalContainerStyle = {
-    ...styles.modalContainer,
-    maxHeight: keyboardPadding > 0
-      ? height - keyboardPadding - 50  // When keyboard is visible
-      : height * 0.8,                  // Normal state (80% of screen)
-  };
-
   return (
     <Modal
       visible={visible}
@@ -213,7 +177,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
           onPress={onClose}
         />
         <Animated.View
-          style={[modalContainerStyle, {transform: [{translateY: modalTranslateY}]}]}>
+          style={[styles.modalContainer, {transform: [{translateY: modalTranslateY}]}]}>
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>Create New Account</Text>
@@ -234,170 +198,129 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
             </View>
           </View>
 
-          <ScrollView
-            style={styles.scrollArea}
-            contentContainerStyle={[
-              styles.scrollContent,
-              Platform.OS === 'android' && {paddingBottom: keyboardPadding + spacing.lg},
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag">
-            {/* Form */}
-            <View style={styles.form}>
-              {/* Account Name */}
-              <TextInput
-                ref={accountNameInputRef}
-                style={styles.input}
-                placeholder="Account Name (e.g., Salary, Savings)"
-                placeholderTextColor={colors.text.secondary}
-                value={accountName}
-                onChangeText={setAccountName}
-                autoCapitalize="words"
-                editable={!loading}
-              />
+          {/* Form */}
+          <View style={styles.form}>
+            {/* Account Name */}
+            <TextInput
+              style={styles.input}
+              placeholder="Account Name"
+              placeholderTextColor={colors.text.secondary}
+              value={accountName}
+              onChangeText={setAccountName}
+              autoCapitalize="words"
+              editable={!loading}
+            />
 
-              {/* Account Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Account Type</Text>
-                <View style={styles.segmentedControl}>
-                  <TouchableOpacity
-                    style={[
-                      styles.segmentButton,
-                      accountType === 'earning' && styles.segmentButtonActive,
-                      (isFirstTime || earningCount >= 2) &&
-                        accountType !== 'earning' &&
-                        styles.segmentButtonDisabled,
-                    ]}
-                    onPress={() => handleAccountTypeChange('earning')}
-                    disabled={loading}>
-                    <Text
-                      style={[
-                        styles.segmentButtonText,
-                        accountType === 'earning' &&
-                          styles.segmentButtonTextActive,
-                      ]}>
-                      Earning
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.segmentButton,
-                      accountType === 'liability' && styles.segmentButtonActive,
-                      isFirstTime && styles.segmentButtonDisabled,
-                    ]}
-                    onPress={() => handleAccountTypeChange('liability')}
-                    disabled={loading || isFirstTime}>
-                    <Text
-                      style={[
-                        styles.segmentButtonText,
-                        accountType === 'liability' &&
-                          styles.segmentButtonTextActive,
-                        isFirstTime && styles.segmentButtonTextDisabled,
-                      ]}>
-                      Liability
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View
-                style={[
-                  styles.primaryRow,
-                  accountType === 'liability' && styles.primaryRowDisabled,
-                ]}>
+            {/* Account Type */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Account Type</Text>
+              <View style={styles.segmentedControl}>
                 <TouchableOpacity
                   style={[
-                    styles.primaryToggle,
-                    isPrimary
-                      ? styles.primaryToggleActive
-                      : styles.primaryToggleInactive,
-                    accountType === 'liability' && styles.primaryToggleDisabled,
+                    styles.segmentButton,
+                    accountType === 'earning' && styles.segmentButtonActive,
+                    (isFirstTime || earningCount >= 2) &&
+                      accountType !== 'earning' &&
+                      styles.segmentButtonDisabled,
                   ]}
-                  onPress={() => setIsPrimary(prev => !prev)}
-                  disabled={loading || accountType === 'liability'}>
-                  <View
+                  onPress={() => handleAccountTypeChange('earning')}
+                  disabled={loading}>
+                  <Text
                     style={[
-                      styles.primaryKnob,
-                      isPrimary && styles.primaryKnobActive,
-                    ]}
-                  />
+                      styles.segmentButtonText,
+                      accountType === 'earning' && styles.segmentButtonTextActive,
+                    ]}>
+                    Earning
+                  </Text>
                 </TouchableOpacity>
-                <Text
+                <TouchableOpacity
                   style={[
-                    styles.primaryText,
-                    accountType === 'liability' && styles.primaryTextDisabled,
-                  ]}>
-                  Set as Primary Account
-                </Text>
-              </View>
-
-              {/* Icons */}
-              <View style={styles.inputGroup}>
-                <View style={styles.selectionGrid}>
-                  {ACCOUNT_ICONS.map(icon => (
-                    <TouchableOpacity
-                      key={icon.id}
-                      style={[
-                        styles.iconOption,
-                        selectedIcon === icon.name && styles.iconOptionSelected,
-                        selectedIcon === icon.name && {
-                          backgroundColor: selectedColor,
-                        },
-                      ]}
-                      onPress={() => setSelectedIcon(icon.name)}>
-                      {renderAccountIcon(
-                        icon.name,
-                        22,
-                        selectedIcon === icon.name
-                          ? colors.white
-                          : colors.text.primary,
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              {/* Colors */}
-              <View style={[styles.inputGroup, styles.inputGroupTight]}>
-                <View style={styles.selectionGrid}>
-                  {ACCOUNT_COLORS.map(color => (
-                    <TouchableOpacity
-                      key={color.id}
-                      style={[
-                        styles.colorOption,
-                        {backgroundColor: color.value},
-                        selectedColor === color.value &&
-                          styles.colorOptionSelected,
-                      ]}
-                      onPress={() => setSelectedColor(color.value)}>
-                      {selectedColor === color.value && (
-                        <Icon name="checkmark" size={20} color={colors.white} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                    styles.segmentButton,
+                    accountType === 'liability' && styles.segmentButtonActive,
+                    isFirstTime && styles.segmentButtonDisabled,
+                  ]}
+                  onPress={() => handleAccountTypeChange('liability')}
+                  disabled={loading || isFirstTime}>
+                  <Text
+                    style={[
+                      styles.segmentButtonText,
+                      accountType === 'liability' &&
+                        styles.segmentButtonTextActive,
+                      isFirstTime && styles.segmentButtonTextDisabled,
+                    ]}>
+                    Liability
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Save Button */}
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.saveButton,
-                  {backgroundColor: selectedColor},
-                  loading && styles.buttonDisabled,
-                ]}
-                onPress={handleSave}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Create Account</Text>
-                )}
-              </TouchableOpacity>
+            {/* Icons */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Icon</Text>
+              <View style={styles.selectionGrid}>
+                {ACCOUNT_ICONS.map(icon => (
+                  <TouchableOpacity
+                    key={icon.id}
+                    style={[
+                      styles.iconOption,
+                      selectedIcon === icon.name && styles.iconOptionSelected,
+                      selectedIcon === icon.name && {
+                        backgroundColor: selectedColor,
+                      },
+                    ]}
+                    onPress={() => setSelectedIcon(icon.name)}>
+                    {renderAccountIcon(
+                      icon.name,
+                      22,
+                      selectedIcon === icon.name
+                        ? colors.white
+                        : colors.text.primary,
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-          </ScrollView>
+
+            {/* Colors */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Color</Text>
+              <View style={styles.selectionGrid}>
+                {ACCOUNT_COLORS.map(color => (
+                  <TouchableOpacity
+                    key={color.id}
+                    style={[
+                      styles.colorOption,
+                      {backgroundColor: color.value},
+                      selectedColor === color.value &&
+                        styles.colorOptionSelected,
+                    ]}
+                    onPress={() => setSelectedColor(color.value)}>
+                    {selectedColor === color.value && (
+                      <Icon name="checkmark" size={20} color={colors.white} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          {/* Save Button */}
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                {backgroundColor: selectedColor},
+                loading && styles.buttonDisabled,
+              ]}
+              onPress={handleSave}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.saveButtonText}>Create Account</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -428,7 +351,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: {
-    fontSize: fontSize.large,
+    fontSize: fontSize.xlarge,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
   },
@@ -443,7 +366,7 @@ const styles = StyleSheet.create({
     width: '90%',
     borderRadius: 16,
     padding: spacing.md,
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
     elevation: 4,
     shadowColor: '#000',
@@ -452,22 +375,16 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 4},
   },
   previewCardIcon: {
-    marginBottom: spacing.sm,
+    marginRight: spacing.md,
   },
   previewCardText: {
-    fontSize: fontSize.regular,
+    flex: 1,
+    fontSize: fontSize.large,
     fontWeight: fontWeight.semibold,
     color: colors.white,
-    textAlign: 'center',
   },
   form: {
-    marginBottom: spacing.md,
-  },
-  scrollArea: {
-    flexGrow: 0,
-  },
-  scrollContent: {
-    paddingBottom: spacing.lg,
+    marginBottom: spacing.lg,
   },
   input: {
     backgroundColor: colors.white,
@@ -476,16 +393,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: spacing.md,
     paddingVertical: 14,
-    fontSize: fontSize.medium,
+    fontSize: fontSize.regular,
     color: colors.text.primary,
     fontWeight: fontWeight.medium,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   inputGroup: {
     marginBottom: spacing.lg,
-  },
-  inputGroupTight: {
-    marginBottom: spacing.sm,
   },
   label: {
     fontSize: fontSize.medium,
@@ -514,7 +428,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
   },
   segmentButtonText: {
-    fontSize: fontSize.small,
+    fontSize: fontSize.regular,
     fontWeight: fontWeight.semibold,
     color: colors.text.secondary,
   },
@@ -524,55 +438,9 @@ const styles = StyleSheet.create({
   segmentButtonTextDisabled: {
     color: '#9CA3AF',
   },
-  primaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 2,
-    marginBottom: spacing.md,
-  },
-  primaryRowDisabled: {
-    opacity: 0.7,
-  },
-  primaryToggle: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    padding: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryToggleActive: {
-    backgroundColor: colors.primary,
-  },
-  primaryToggleInactive: {
-    backgroundColor: '#E5E7EB',
-  },
-  primaryToggleDisabled: {
-    backgroundColor: '#D1D5DB',
-  },
-  primaryKnob: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    transform: [{translateX: -10}],
-  },
-  primaryKnobActive: {
-    transform: [{translateX: 10}],
-  },
-  primaryText: {
-    marginLeft: spacing.md,
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.medium,
-    color: colors.text.primary,
-  },
-  primaryTextDisabled: {
-    color: '#9CA3AF',
-  },
   selectionGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: spacing.sm,
+    justifyContent: 'space-between',
   },
   iconOption: {
     width: 48,
@@ -601,13 +469,9 @@ const styles = StyleSheet.create({
     borderColor: colors.white,
     elevation: 4,
     transform: [{scale: 1.1}],
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 4},
   },
   buttonContainer: {
-    marginTop: spacing.xs,
+    marginTop: 'auto',
   },
   saveButton: {
     paddingVertical: 16,
@@ -617,7 +481,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   saveButtonText: {
-    fontSize: fontSize.medium,
+    fontSize: fontSize.large,
     fontWeight: fontWeight.bold,
     color: colors.white,
   },

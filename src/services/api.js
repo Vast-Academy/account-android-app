@@ -4,7 +4,7 @@ import { refreshToken, getFirebaseToken } from '../utils/tokenManager';
 
 // Backend API base URL
 // const API_BASE_URL = 'http://10.0.2.2:5000/api'; // Android emulator ke liye
-const API_BASE_URL = 'http://192.168.1.8:5000/api'; // Physical device ke liye
+const API_BASE_URL = 'http://192.168.1.10:5000/api'; // Physical device ke liye
 
 const api = axios.create({
   baseURL: API_BASE_URL,

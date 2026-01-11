@@ -94,7 +94,7 @@ const MainTabNavigator = ({route}) => {
         <Tab.Screen
           name="Dashboard"
           component={DashboardScreen}
-          initialParams={{user, showTutorial: route.params?.showTutorial}}
+          initialParams={{user}}
           options={{
             tabBarIcon: ({color, size}) => (
               <Icon name="home" size={size} color={color} />

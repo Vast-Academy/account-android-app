@@ -5,19 +5,18 @@ import {
   TextInput,
   StyleSheet,
   ScrollView,
+  Pressable,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
   Modal,
   Animated,
   Easing,
+  Keyboard,
+  InteractionManager,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  HandDeposit as PiHandDepositLight,
-  HandWithdraw as PiHandWithdrawLight,
-} from 'phosphor-react-native';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {
   initTransactionsDatabase,
@@ -58,6 +57,37 @@ const METRIC_ICON_SIZE = 28;
 const METRIC_LABEL_GAP = 6;
 const METRIC_LABEL_OFFSET = METRIC_ICON_SIZE + METRIC_LABEL_GAP;
 
+const withAlpha = (hex, alpha) => {
+  if (!hex || typeof hex !== 'string') {
+    return hex;
+  }
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) {
+    return hex;
+  }
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+};
+
+const tintWithWhite = (hex, whiteRatio = 0.94) => {
+  if (!hex || typeof hex !== 'string') {
+    return hex;
+  }
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) {
+    return hex;
+  }
+  const ratio = Math.min(1, Math.max(0, whiteRatio));
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  const mix = channel => Math.round(255 * ratio + channel * (1 - ratio));
+  const toHex = value => value.toString(16).padStart(2, '0');
+  return `#${toHex(mix(red))}${toHex(mix(green))}${toHex(mix(blue))}`;
+};
+
 const LiabilityAccountDetailScreen = ({route, navigation}) => {
   const account = route?.params?.account || {
     id: null,
@@ -66,6 +96,7 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   };
 
   const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawNote, setWithdrawNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [totalBalance, setTotalBalance] = useState(0);
@@ -73,8 +104,11 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   const [requestModalVisible, setRequestModalVisible] = useState(false);
   const [requestSelectVisible, setRequestSelectVisible] = useState(false);
   const [requestAmount, setRequestAmount] = useState('');
+  const [requestNote, setRequestNote] = useState('');
   const [requestAccounts, setRequestAccounts] = useState([]);
-  const [requestAmountValue, setRequestAmountValue] = useState(0);
+  const [requestTarget, setRequestTarget] = useState(null);
+  const [requestFieldHeight, setRequestFieldHeight] = useState(0);
+  const [requestAccountWidth, setRequestAccountWidth] = useState(0);
   const [lowBalanceVisible, setLowBalanceVisible] = useState(false);
   const [lowBalanceMessage, setLowBalanceMessage] = useState('');
   const [quickPeriod, setQuickPeriod] = useState('1month');
@@ -88,6 +122,8 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const scrollViewRef = useRef(null);
+  const requestAmountInputRef = useRef(null);
+  const withdrawAmountInputRef = useRef(null);
   const lowBalanceTimerRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
 
@@ -140,7 +176,7 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   }, [transactions]);
 
   useEffect(() => {
-    if (withdrawModalVisible || requestModalVisible || requestSelectVisible) {
+    if (withdrawModalVisible || requestModalVisible) {
       Animated.timing(modalSlideAnim, {
         toValue: 1,
         duration: 240,
@@ -150,7 +186,31 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     } else {
       modalSlideAnim.setValue(0);
     }
-  }, [withdrawModalVisible, requestModalVisible, requestSelectVisible, modalSlideAnim]);
+  }, [withdrawModalVisible, requestModalVisible, modalSlideAnim]);
+
+  useEffect(() => {
+    if (!requestModalVisible) {
+      setRequestSelectVisible(false);
+      return;
+    }
+    try {
+      const earningAccounts = getAccountsByType('earning');
+      setRequestAccounts(earningAccounts);
+      if (earningAccounts.length === 0) {
+        setRequestTarget(null);
+        return;
+      }
+      setRequestTarget(current =>
+        current && earningAccounts.some(item => item.id === current.id)
+          ? current
+          : earningAccounts[0]
+      );
+    } catch (error) {
+      console.error('Failed to load earning accounts:', error);
+      setRequestAccounts([]);
+      setRequestTarget(null);
+    }
+  }, [requestModalVisible]);
 
   useEffect(() => {
     return () => {
@@ -159,6 +219,46 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
       }
     };
   }, []);
+
+  const focusWithdrawAmountInput = useCallback(() => {
+    const focus = () => withdrawAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  const focusRequestAmountInput = useCallback(() => {
+    const focus = () => requestAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  useEffect(() => {
+    if (!withdrawModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusWithdrawAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [withdrawModalVisible, focusWithdrawAmountInput]);
+
+  useEffect(() => {
+    if (!requestModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusRequestAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [requestModalVisible, focusRequestAmountInput]);
 
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
@@ -169,9 +269,11 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     setLoading(true);
     try {
       const amountValue = Math.abs(parseFloat(withdrawAmount));
-      await createTransaction(account.id, -amountValue, '');
+      const remark = withdrawNote.trim();
+      await createTransaction(account.id, -amountValue, remark);
       Alert.alert('Success', 'Transaction added successfully!');
       setWithdrawAmount('');
+      setWithdrawNote('');
       loadTransactions();
       return true;
     } catch (error) {
@@ -190,26 +292,28 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     }
 
     const amountValue = Math.abs(parseFloat(requestAmount));
-    const earningAccounts = getAccountsByType('earning');
-    if (!earningAccounts || earningAccounts.length === 0) {
+    if (!requestAccounts || requestAccounts.length === 0) {
       Alert.alert('No Accounts', 'No earning accounts available for request.');
       return false;
     }
 
-    setRequestAmountValue(amountValue);
-    setRequestAccounts(earningAccounts);
-    setRequestSelectVisible(true);
+    if (!requestTarget) {
+      Alert.alert('Select Account', 'Please select an earning account.');
+      return false;
+    }
+
+    await handleRequestFromAccount(requestTarget, amountValue);
     return true;
   };
 
-  const handleRequestFromAccount = async earningAccount => {
-    if (!earningAccount || !requestAmountValue) {
+  const handleRequestFromAccount = async (earningAccount, amountValue) => {
+    if (!earningAccount || !amountValue) {
       return;
     }
     setLoading(true);
     try {
       const earningBalance = calculateAccountBalance(earningAccount.id);
-      if (earningBalance < requestAmountValue) {
+      if (earningBalance < amountValue) {
         setLowBalanceMessage(
           `Low balance on ${earningAccount.account_name}.`
         );
@@ -223,18 +327,25 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
         return;
       }
 
+      const trimmedNote = requestNote.trim();
+      const fromRemark = trimmedNote
+        ? `Requested by ${account.account_name} - ${trimmedNote}`
+        : `Requested by ${account.account_name}`;
+      const toRemark = trimmedNote
+        ? `Requested from ${earningAccount.account_name} - ${trimmedNote}`
+        : `Requested from ${earningAccount.account_name}`;
       await createTransaction(
         earningAccount.id,
-        -requestAmountValue,
-        `Requested by ${account.account_name}`
+        -amountValue,
+        fromRemark
       );
       await createTransaction(
         account.id,
-        requestAmountValue,
-        `Requested from ${earningAccount.account_name}`
+        amountValue,
+        toRemark
       );
       setRequestAmount('');
-      setRequestAmountValue(0);
+      setRequestNote('');
       setRequestSelectVisible(false);
       loadTransactions();
       Alert.alert('Success', 'Request completed successfully!');
@@ -500,9 +611,21 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        account.icon_color && {
+          backgroundColor: tintWithWhite(account.icon_color, 0.94),
+        },
+      ]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          account.icon_color && {
+            borderBottomColor: withAlpha(account.icon_color, 0.3),
+          },
+        ]}>
         <View style={styles.headerTopRow}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-back" size={24} color={colors.text.primary} />
@@ -620,25 +743,11 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
             <View style={styles.accountMetricsRow}>
               <View style={styles.accountMetricHalf}>
                 <View style={styles.accountMetricLabelRow}>
-                  <View
-                    style={[
-                      styles.accountMetricIcon,
-                      {
-                        backgroundColor:
-                          account.icon_color ||
-                          (account.account_type === 'liability'
-                            ? '#F59E0B'
-                            : '#10B981'),
-                      },
-                    ]}>
-                    <PiHandDepositLight size={24} color="#FFFFFF" weight="light" />
-                  </View>
                   <Text style={styles.accountMetricLabel}>Added</Text>
                 </View>
                 <Text
                   style={[
                     styles.accountMetricValue,
-                    styles.accountMetricValueIndented,
                     account.icon_color && {color: account.icon_color},
                   ]}>
                   {formatCurrency(filteredAdded)}
@@ -647,22 +756,27 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
               <View style={styles.accountMetricDivider} />
               <View style={styles.accountMetricHalf}>
                 <View style={styles.accountMetricLabelRow}>
-                  <View
-                    style={[
-                      styles.accountMetricIcon,
-                      styles.accountMetricIconNegative,
-                    ]}>
-                    <PiHandWithdrawLight size={24} color="#FFFFFF" weight="light" />
-                  </View>
                   <Text style={styles.accountMetricLabel}>Withdrawals</Text>
                 </View>
                 <Text
                   style={[
                     styles.accountMetricValue,
-                    styles.accountMetricValueIndented,
                     styles.accountMetricNegative,
                   ]}>
                   {formatCurrency(filteredWithdrawals)}
+                </Text>
+              </View>
+              <View style={styles.accountMetricDivider} />
+              <View style={styles.accountMetricHalf}>
+                <View style={styles.accountMetricLabelRow}>
+                  <Text style={styles.accountMetricLabel}>Balance</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.accountMetricValue,
+                    account.icon_color && {color: account.icon_color},
+                  ]}>
+                  {formatCurrency(totalBalance)}
                 </Text>
               </View>
             </View>
@@ -689,50 +803,13 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
       )}
 
       {/* Bottom Fixed Section */}
-      <View style={styles.bottomSection}>
-        {/* Bottom Navigation Icons */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.bottomNavIcon}
-            onPress={() => Alert.alert('Notes', 'Notes feature coming soon')}>
-            <Icon name="document-text-outline" size={24} color={colors.text.secondary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.bottomNavIcon}
-            onPress={() => Alert.alert('Messages', 'Messages feature coming soon')}>
-            <Icon name="chatbubble-outline" size={24} color={colors.text.secondary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.bottomNavIcon}
-            onPress={() => Alert.alert('Call', 'Call feature coming soon')}>
-            <Icon name="call-outline" size={24} color={colors.text.secondary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.bottomNavIcon}
-            onPress={() => Alert.alert('WhatsApp', 'WhatsApp feature coming soon')}>
-            <Icon name="logo-whatsapp" size={24} color={colors.text.secondary} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Balance Display */}
-        <View style={styles.balanceRow}>
-          <Text style={styles.balanceLabel}>Total Balance</Text>
-          <View style={styles.balanceAmount}>
-              <Text
-                style={[
-                  styles.balanceValue,
-                  account.icon_color && {color: account.icon_color},
-                ]}>
-                {formatCurrency(totalBalance)}
-              </Text>
-              <Icon
-                name="chevron-forward"
-                size={20}
-                color={account.icon_color || '#10B981'}
-              />
-          </View>
-        </View>
-
+      <View
+        style={[
+          styles.bottomSection,
+          account.icon_color && {
+            borderTopColor: withAlpha(account.icon_color, 0.3),
+          },
+        ]}>
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
@@ -754,12 +831,18 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
         visible={withdrawModalVisible}
         transparent
         animationType="none"
-        onRequestClose={() => setWithdrawModalVisible(false)}>
+        onRequestClose={() => {
+          setWithdrawModalVisible(false);
+          setWithdrawNote('');
+        }}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.modalBackdrop}
             activeOpacity={1}
-            onPress={() => setWithdrawModalVisible(false)}
+            onPress={() => {
+              setWithdrawModalVisible(false);
+              setWithdrawNote('');
+            }}
           />
           <Animated.View
             style={[
@@ -782,10 +865,28 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
               value={withdrawAmount}
               onChangeText={setWithdrawAmount}
               keyboardType="numeric"
+              autoFocus
+              ref={withdrawAmountInputRef}
+              showSoftInputOnFocus
+              editable={!loading}
+            />
+            <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
+            <TextInput
+              style={styles.modalNoteInput}
+              value={withdrawNote}
+              onChangeText={setWithdrawNote}
+              placeholder="Add a note"
+              placeholderTextColor={colors.text.light}
+              multiline
+              numberOfLines={3}
               editable={!loading}
             />
             <TouchableOpacity
-              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
+              style={[
+                styles.modalAddButton,
+                account.icon_color && {backgroundColor: account.icon_color},
+                loading && styles.buttonDisabled,
+              ]}
               onPress={async () => {
                 const didAdd = await handleWithdraw();
                 if (didAdd) {
@@ -807,12 +908,18 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
         visible={requestModalVisible}
         transparent
         animationType="none"
-        onRequestClose={() => setRequestModalVisible(false)}>
+        onRequestClose={() => {
+          setRequestModalVisible(false);
+          setRequestNote('');
+        }}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.modalBackdrop}
             activeOpacity={1}
-            onPress={() => setRequestModalVisible(false)}
+            onPress={() => {
+              setRequestModalVisible(false);
+              setRequestNote('');
+            }}
           />
           <Animated.View
             style={[
@@ -828,71 +935,143 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
                 ],
               },
             ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Request Amount</Text>
-            <TextInput
-              style={styles.modalAmountInput}
-              value={requestAmount}
-              onChangeText={setRequestAmount}
-              keyboardType="numeric"
-              editable={!loading}
-            />
-            <TouchableOpacity
-              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
-              onPress={async () => {
-                const didOpen = await handleRequestStart();
-                if (didOpen) {
-                  setRequestModalVisible(false);
-                }
-              }}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalAddButtonText}>Request</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={requestSelectVisible}
-        transparent
-        animationType="none"
-        onRequestClose={() => setRequestSelectVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => setRequestSelectVisible(false)}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Select Earning Account</Text>
-            <ScrollView style={styles.transferList} showsVerticalScrollIndicator={false}>
-              {requestAccounts.map(item => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.transferItem}
-                  onPress={() => handleRequestFromAccount(item)}>
-                  <Text style={styles.transferName}>{item.account_name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {requestSelectVisible && (
+              <Pressable
+                style={styles.transferDismissOverlay}
+                onPress={() => setRequestSelectVisible(false)}
+              />
+            )}
+            <View style={styles.modalContent}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Request Amount</Text>
+              <View style={styles.amountFieldWrapper}>
+                <View
+                  style={styles.amountFieldRow}
+                  onLayout={event =>
+                    setRequestFieldHeight(event.nativeEvent.layout.height)
+                  }>
+                  <TextInput
+                    style={styles.amountInputBare}
+                    value={requestAmount}
+                    onChangeText={setRequestAmount}
+                    keyboardType="numeric"
+                    autoFocus
+                    ref={requestAmountInputRef}
+                    showSoftInputOnFocus
+                    editable={!loading}
+                  />
+                  <View style={styles.amountFieldDivider} />
+                  <TouchableOpacity
+                    style={styles.amountAccountButton}
+                    onPress={() =>
+                      setRequestSelectVisible(current => !current)
+                    }
+                    onLayout={event =>
+                      setRequestAccountWidth(event.nativeEvent.layout.width)
+                    }
+                    disabled={requestAccounts.length === 0}>
+                    <Text
+                      style={[
+                        styles.amountAccountText,
+                        requestTarget?.icon_color && {
+                          color: requestTarget.icon_color,
+                        },
+                      ]}
+                      numberOfLines={1}>
+                      {requestTarget?.account_name ||
+                        (requestAccounts.length
+                          ? 'Select account'
+                          : 'No accounts')}
+                    </Text>
+                    <Icon
+                      name="chevron-down"
+                      size={16}
+                      color={colors.text.secondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+                {requestSelectVisible && (
+                  <View
+                    style={[
+                      styles.floatingAccountList,
+                      {
+                        bottom: requestFieldHeight + 6,
+                        right: 0,
+                        width: requestAccountWidth || 140,
+                      },
+                    ]}>
+                    <ScrollView
+                      style={styles.floatingAccountScroll}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled">
+                      {requestAccounts.map(item => {
+                        const isSelected = requestTarget?.id === item.id;
+                        const itemColor =
+                          item.icon_color || colors.text.primary;
+                        return (
+                          <TouchableOpacity
+                            key={item.id}
+                            style={[
+                              styles.floatingAccountItem,
+                              isSelected && styles.floatingAccountItemSelected,
+                            ]}
+                            onPress={() => {
+                              setRequestTarget(item);
+                              setRequestSelectVisible(false);
+                            }}>
+                            <Text
+                              style={[
+                                styles.floatingAccountText,
+                                {color: itemColor},
+                                isSelected && styles.floatingAccountTextSelected,
+                              ]}>
+                              {item.account_name}
+                            </Text>
+                            {isSelected && (
+                              <Icon
+                                name="checkmark-circle"
+                                size={16}
+                                color={itemColor}
+                              />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
+              <TextInput
+                style={styles.modalNoteInput}
+                value={requestNote}
+                onChangeText={setRequestNote}
+                placeholder="Add a note"
+                placeholderTextColor={colors.text.light}
+                multiline
+                numberOfLines={3}
+                editable={!loading}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.modalAddButton,
+                  account.icon_color && {backgroundColor: account.icon_color},
+                  loading && styles.buttonDisabled,
+                ]}
+                onPress={async () => {
+                  const didOpen = await handleRequestStart();
+                  if (didOpen) {
+                    setRequestModalVisible(false);
+                  }
+                }}
+                disabled={loading}>
+                {loading ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={styles.modalAddButtonText}>Request</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         </View>
       </Modal>
@@ -1157,7 +1336,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#EF4444',
   },
   accountMetricLabel: {
-    fontSize: fontSize.small,
+    fontSize: 13,
     color: colors.text.secondary,
     textAlign: 'left',
   },
@@ -1335,7 +1514,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   bottomSection: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingBottom: spacing.md,
@@ -1391,7 +1570,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     borderRadius: 8,
     gap: 6,
     borderWidth: 1,
@@ -1408,7 +1587,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     borderRadius: 8,
     gap: 6,
     borderWidth: 1,
@@ -1433,6 +1612,15 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     padding: spacing.md,
     paddingBottom: spacing.lg,
+    position: 'relative',
+  },
+  modalContent: {
+    position: 'relative',
+    zIndex: 2,
+  },
+  transferDismissOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   modalHandle: {
     alignSelf: 'center',
@@ -1458,6 +1646,99 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
     marginBottom: spacing.md,
+  },
+  modalNoteLabel: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  modalNoteInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+    textAlignVertical: 'top',
+  },
+  amountFieldWrapper: {
+    position: 'relative',
+    zIndex: 5,
+    marginBottom: spacing.md,
+    overflow: 'visible',
+  },
+  amountFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+    paddingLeft: 14,
+  },
+  amountInputBare: {
+    flex: 75,
+    fontSize: 22,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    paddingVertical: 14,
+    paddingRight: 8,
+  },
+  amountFieldDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: colors.border,
+  },
+  amountAccountButton: {
+    flex: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  amountAccountText: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  floatingAccountList: {
+    position: 'absolute',
+    right: 0,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+    zIndex: 10,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  floatingAccountScroll: {
+    maxHeight: 180,
+  },
+  floatingAccountItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  floatingAccountItemSelected: {
+    backgroundColor: '#F3F4F6',
+  },
+  floatingAccountText: {
+    fontSize: 13,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  floatingAccountTextSelected: {
+    fontWeight: fontWeight.bold,
   },
   modalAddButton: {
     backgroundColor: colors.primary,

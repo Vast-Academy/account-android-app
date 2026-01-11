@@ -1,0 +1,326 @@
+import React, {useState, useEffect, useRef} from 'react';
+import {
+  Modal,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Platform,
+  Dimensions,
+  ScrollView,
+  Switch,
+} from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import BsCashCoin from './icons/BsCashCoin';
+import {
+  createAccount,
+  getEarningAccountsCount,
+  isAccountNameExists,
+  setPrimaryAccount,
+} from '../services/accountsDatabase';
+import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
+
+// --- Configuration ---
+const ACCOUNT_ICONS = [
+  {id: 'wallet', name: 'wallet-outline'},
+  {id: 'cash', name: 'bs-cash-coin'},
+  {id: 'home', name: 'home-outline'},
+  {id: 'car', name: 'car-outline'},
+  {id: 'restaurant', name: 'restaurant-outline'},
+  {id: 'group', name: 'people-outline'},
+];
+
+const ACCOUNT_COLORS = [
+  {id: 'blue', value: '#60A5FA'},
+  {id: 'cyan', value: '#22D3EE'},
+  {id: 'teal', value: '#2DD4BF'},
+  {id: 'pink', value: '#F472B6'},
+  {id: 'orange', value: '#FB923C'},
+  {id: 'yellow', value: '#FACC15'},
+];
+
+// --- Helper Components ---
+const renderAccountIcon = (iconName, size, color) => {
+  if (iconName === 'bs-cash-coin') {
+    return <BsCashCoin size={size} color={color} />;
+  }
+  return <Icon name={iconName} size={size} color={color} />;
+};
+
+const {height, width} = Dimensions.get('window');
+
+// --- Main Component ---
+const AddAccountModal = ({visible, onClose, onSuccess}) => {
+  // --- State ---
+  const [accountName, setAccountName] = useState('');
+  const [accountType, setAccountType] = useState('earning');
+  const [loading, setLoading] = useState(false);
+  const [earningCount, setEarningCount] = useState(0);
+  const [isFirstTime, setIsFirstTime] = useState(true);
+  const [isPrimary, setIsPrimary] = useState(false);
+  const [selectedIcon, setSelectedIcon] = useState(ACCOUNT_ICONS[0].name);
+  const [selectedColor, setSelectedColor] = useState(ACCOUNT_COLORS[0].value);
+
+  // --- Animations ---
+  const modalAnim = useRef(new Animated.Value(0)).current;
+
+  // --- Effects ---
+  useEffect(() => {
+    if (visible) {
+      // Reset form on open
+      setAccountName('');
+      setLoading(false);
+      setSelectedIcon(ACCOUNT_ICONS[0].name);
+      setSelectedColor(ACCOUNT_COLORS[0].value);
+      checkEarningAccounts();
+      // Animate modal in
+      Animated.timing(modalAnim, {
+        toValue: 1,
+        duration: 350,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Hide modal instantly on close
+      modalAnim.setValue(0);
+    }
+  }, [visible]);
+
+  // --- Logic ---
+  const checkEarningAccounts = () => {
+    try {
+      const count = getEarningAccountsCount();
+      setEarningCount(count);
+      if (count === 0) {
+        setIsFirstTime(true);
+        setAccountType('earning');
+        setIsPrimary(true);
+      } else {
+        setIsFirstTime(false);
+        setAccountType('liability');
+        setIsPrimary(false);
+      }
+    } catch (error) {
+      console.error('Failed to check earning accounts:', error);
+      setIsFirstTime(true);
+      setAccountType('earning');
+      setIsPrimary(true);
+    }
+  };
+
+  const handleAccountTypeChange = newType => {
+    if (isFirstTime && newType === 'liability') {
+      Alert.alert('Not Available', 'Your first account must be an Earning Account.');
+      return;
+    }
+    if (!isFirstTime && newType === 'earning' && earningCount >= 2) {
+      Alert.alert('Limit Reached', 'You can only add up to 2 earning accounts.');
+      return;
+    }
+    setAccountType(newType);
+  };
+
+  const handleSave = async () => {
+    if (!accountName.trim()) {
+      Alert.alert('Required', 'Please enter an account name.');
+      return;
+    }
+    if (isAccountNameExists(accountName)) {
+      Alert.alert('Error', 'An account with this name already exists.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await createAccount(
+        accountName,
+        accountType,
+        selectedIcon,
+        selectedColor,
+      );
+      if (accountType === 'earning' && isPrimary && result.insertId) {
+        await setPrimaryAccount(result.insertId);
+      }
+      if (onSuccess) onSuccess();
+      onClose();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to create account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Animated Styles ---
+  const modalTranslateY = modalAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [height, 0],
+  });
+
+  // --- Render ---
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+        <Animated.View style={[styles.modalContainer, {transform: [{translateY: modalTranslateY}]}]}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Create Account</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Icon name="close" size={28} color={colors.text.secondary} />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.contentContainer}>
+              <View style={styles.previewContainer}>
+                <View style={[styles.previewIcon, {backgroundColor: selectedColor}]}>
+                  {renderAccountIcon(selectedIcon, 20, colors.white)}
+                </View>
+                <Text style={styles.previewName} numberOfLines={1}>
+                  {accountName.trim() ? accountName.trim() : 'Account Name'}
+                </Text>
+              </View>
+
+              <TextInput
+                style={styles.input}
+                placeholder="Eg. Salary, Budget, Earning Account"
+                placeholderTextColor={colors.text.secondary}
+                value={accountName}
+                onChangeText={setAccountName}
+                autoCapitalize="words"
+              />
+
+              <View style={styles.rowContainer}>
+                <View style={{flex: 1}}>
+                  <Text style={styles.label}>Account Type</Text>
+                  <View style={styles.segmentedControl}>
+                    <TouchableOpacity
+                      style={[styles.segmentButton, accountType === 'earning' && styles.segmentButtonActive]}
+                      onPress={() => handleAccountTypeChange('earning')}
+                      disabled={!isFirstTime && earningCount >= 2}>
+                      <Text style={[styles.segmentButtonText, accountType === 'earning' && styles.segmentButtonTextActive]}>Earning</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.segmentButton, accountType === 'liability' && styles.segmentButtonActive, isFirstTime && styles.segmentDisabled]}
+                      onPress={() => handleAccountTypeChange('liability')}
+                      disabled={isFirstTime}>
+                      <Text style={[styles.segmentButtonText, accountType === 'liability' && styles.segmentButtonTextActive, isFirstTime && styles.segmentTextDisabled]}>Liability</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {accountType === 'earning' && (
+                  <View style={styles.primaryContainer}>
+                    <Text style={styles.label}>Primary</Text>
+                    <Switch
+                      trackColor={{ false: "#E5E7EB", true: colors.primary_light }}
+                      thumbColor={colors.white}
+                      ios_backgroundColor="#E5E7EB"
+                      onValueChange={setIsPrimary}
+                      value={isPrimary}
+                      disabled={isFirstTime || loading}
+                    />
+                  </View>
+                )}
+              </View>
+              
+              <View style={styles.infoTextContainer}>
+                {isFirstTime && (
+                  <Text style={styles.infoText}>
+                    First account must be an Earning Account
+                  </Text>
+                )}
+                {!isFirstTime && earningCount >= 2 && (
+                  <Text style={styles.warningText}>
+                    Maximum 2 earning accounts reached
+                  </Text>
+                )}
+                {!isFirstTime && earningCount < 2 && accountType === 'earning' && (
+                  <Text style={styles.infoText}>
+                    Earning accounts: {earningCount}/2
+                  </Text>
+                )}
+              </View>
+
+              <Text style={styles.label}>Choose an icon</Text>
+              <View style={styles.grid}>
+                {ACCOUNT_ICONS.map(icon => (
+                  <TouchableOpacity
+                    key={icon.id}
+                    style={[styles.gridItem, selectedIcon === icon.name && styles.gridItemSelected]}
+                    onPress={() => setSelectedIcon(icon.name)}>
+                    {renderAccountIcon(icon.name, 24, selectedIcon === icon.name ? selectedColor : colors.text.primary)}
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.label}>Choose a color</Text>
+              <View style={styles.grid}>
+                {ACCOUNT_COLORS.map(color => (
+                  <TouchableOpacity
+                    key={color.id}
+                    style={[styles.gridItem, styles.colorGridItem, {backgroundColor: color.value}]}
+                    onPress={() => setSelectedColor(color.value)}>
+                    {selectedColor === color.value && <Icon name="checkmark" size={24} color={colors.white} />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
+
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={[styles.createButton, {backgroundColor: selectedColor}]}
+              onPress={handleSave}
+              disabled={loading}>
+              {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Create Account</Text>}
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+};
+
+// --- Styles ---
+const styles = StyleSheet.create({
+  overlay: {flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end'},
+  backdrop: {...StyleSheet.absoluteFillObject},
+  modalContainer: {backgroundColor: '#F9FAFB', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: height * 0.85, overflow: 'hidden'},
+  header: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border},
+  title: {fontSize: fontSize.xlarge, fontWeight: fontWeight.bold, color: colors.text.primary},
+  closeButton: {padding: 4},
+  contentContainer: {padding: spacing.md},
+  previewContainer: {flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white, padding: spacing.sm, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.lg},
+  previewIcon: {width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm},
+  previewName: {flex: 1, fontSize: fontSize.medium, fontWeight: fontWeight.semibold, color: colors.text.primary},
+  input: {backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, fontSize: fontSize.regular, color: colors.text.primary, fontWeight: fontWeight.medium, marginBottom: spacing.lg},
+  label: {fontSize: fontSize.medium, fontWeight: fontWeight.semibold, color: colors.text.primary, marginBottom: spacing.sm, marginTop: spacing.sm},
+  rowContainer: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, marginBottom: spacing.xs},
+  segmentedControl: {flexDirection: 'row', backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', flex: 1},
+  segmentButton: {flex: 1, paddingVertical: 14, alignItems: 'center', justifyContent: 'center'},
+  segmentButtonActive: {backgroundColor: colors.primary},
+  segmentDisabled: {backgroundColor: '#E5E7EB'},
+  segmentButtonText: {fontSize: fontSize.regular, fontWeight: fontWeight.semibold, color: colors.text.secondary},
+  segmentButtonTextActive: {color: colors.white},
+  segmentTextDisabled: {color: '#9CA3AF'},
+  primaryContainer: {alignItems: 'center'},
+  infoTextContainer: {minHeight: 20, marginBottom: spacing.md},
+  infoText: {fontSize: fontSize.small, color: colors.text.secondary, textAlign: 'left'},
+  warningText: {fontSize: fontSize.small, color: colors.error, textAlign: 'left'},
+  grid: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: spacing.md},
+  gridItem: {width: (width - (spacing.md * 2)) / 3 - 12, height: 52, margin: 6, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border},
+  gridItemSelected: {borderColor: colors.primary, borderWidth: 2},
+  colorGridItem: {borderWidth: 0},
+  footer: {padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.border},
+  createButton: {paddingVertical: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center'},
+  buttonText: {fontSize: fontSize.large, fontWeight: fontWeight.bold, color: colors.white},
+});
+
+export default AddAccountModal;
