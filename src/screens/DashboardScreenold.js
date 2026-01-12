@@ -13,6 +13,8 @@ import {
   UIManager,
   Animated,
   TextInput,
+  Dimensions,
+  InteractionManager,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
@@ -33,6 +35,7 @@ import {
   getTransactionsByAccount,
 } from '../services/transactionsDatabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {useToast} from '../hooks/useToast';
 
 // Quick Period Options
 const QUICK_PERIODS = [
@@ -68,6 +71,14 @@ const DEFAULT_MONTH_START_DAY = 1;
 const METRIC_ICON_SIZE = 24;
 const METRIC_LABEL_GAP = 8;
 const METRIC_LABEL_OFFSET = METRIC_ICON_SIZE + METRIC_LABEL_GAP;
+const TUTORIAL_FAB_SIZE = 72;
+const TUTORIAL_RING_SIZE = 92;
+const TAB_BAR_HEIGHT = 76;
+const HANDWRITING_FONT = Platform.select({
+  ios: 'Snell Roundhand',
+  android: 'cursive',
+  default: 'cursive',
+});
 
 const renderAccountIcon = (iconName, size, color) => {
   if (iconName === 'bs-cash-coin') {
@@ -77,7 +88,13 @@ const renderAccountIcon = (iconName, size, color) => {
 };
 
 const DashboardScreen = ({route, navigation}) => {
-  const {user} = route.params || {};
+  const {user, showTutorial} = route.params || {};
+  const userNameRaw =
+    user?.displayName ||
+    user?.name ||
+    (user?.email ? user.email.split('@')[0] : '') ||
+    'there';
+  const userName = String(userNameRaw).trim().split(/\s+/)[0] || 'there';
 
   // Period selection states
   const [quickPeriod, setQuickPeriod] = useState('1month');
@@ -105,7 +122,81 @@ const DashboardScreen = ({route, navigation}) => {
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
+  const [fabLayout, setFabLayout] = useState(null);
+  const {showToast} = useToast();
 
+  const fabRef = useRef(null);
+
+  const showTutorialStep1 =
+    Boolean(showTutorial) && accounts.length === 0 && !showAddAccountModal;
+
+  const handleAddAccountPress = () => {
+    setShowAddAccountModal(true);
+  };
+
+  const updateFabLayout = React.useCallback(() => {
+    if (!fabRef.current) {
+      return;
+    }
+    fabRef.current.measureInWindow((x, y, width, height) => {
+      if (Number.isFinite(x) && Number.isFinite(y) && width > 0 && height > 0) {
+        setFabLayout({x, y, width, height});
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!showTutorialStep1) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        updateFabLayout();
+        setTimeout(updateFabLayout, 100);
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [showTutorialStep1, updateFabLayout]);
+
+  const tutorialFabPosition = React.useMemo(() => {
+    const {width: windowWidth, height: windowHeight} = Dimensions.get('window');
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+    if (fabLayout) {
+      const left =
+        fabLayout.x + fabLayout.width / 2 - TUTORIAL_RING_SIZE / 2;
+      const top =
+        fabLayout.y + fabLayout.height / 2 - TUTORIAL_RING_SIZE / 2;
+      return {
+        left: clamp(
+          left,
+          spacing.md,
+          windowWidth - TUTORIAL_RING_SIZE - spacing.md
+        ),
+        top: clamp(
+          top,
+          spacing.md,
+          windowHeight - TUTORIAL_RING_SIZE - (spacing.lg + TAB_BAR_HEIGHT)
+        ),
+      };
+    }
+    return {
+      right: spacing.lg - 18,
+      bottom: spacing.lg + TAB_BAR_HEIGHT - 18,
+    };
+  }, [fabLayout]);
+
+  const tutorialTextPosition = React.useMemo(() => {
+    const {height: windowHeight} = Dimensions.get('window');
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+    const baseTop = fabLayout
+      ? fabLayout.y + fabLayout.height / 2 - 32
+      : windowHeight - (TAB_BAR_HEIGHT + 90);
+    return {
+      left: spacing.md,
+      top: clamp(baseTop, spacing.md, windowHeight - 80),
+      width: 260,
+    };
+  }, [fabLayout]);
 
   // Animation values
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -182,7 +273,10 @@ const DashboardScreen = ({route, navigation}) => {
       const stored = await AsyncStorage.getItem('pinnedAccountIds');
       if (stored) {
         const parsed = JSON.parse(stored);
-        setPinnedAccountIds(Array.isArray(parsed) ? parsed : []);
+        const normalized = Array.isArray(parsed)
+          ? parsed.map(id => String(id))
+          : [];
+        setPinnedAccountIds(normalized);
       }
     } catch (error) {
       console.error('Failed to load pinned accounts:', error);
@@ -241,27 +335,29 @@ const DashboardScreen = ({route, navigation}) => {
       }
       const orderMap = new Map();
       orderIds.forEach((id, index) => {
-        orderMap.set(id, index);
+        orderMap.set(String(id), index);
       });
       return [...accountsList].sort(
         (first, second) =>
-          (orderMap.get(first.id) ?? 0) - (orderMap.get(second.id) ?? 0)
+          (orderMap.get(String(first.id)) ?? 0) -
+          (orderMap.get(String(second.id)) ?? 0)
       );
     }
     const pinnedOrder = new Map();
     pinnedIds.forEach((id, index) => {
-      pinnedOrder.set(id, index);
+      pinnedOrder.set(String(id), index);
     });
     const orderMap = new Map();
     if (orderIds && orderIds.length > 0) {
       orderIds.forEach((id, index) => {
-        orderMap.set(id, index);
+        orderMap.set(String(id), index);
       });
     }
     const pinned = [];
     const unpinned = [];
     accountsList.forEach(account => {
-      if (pinnedOrder.has(account.id)) {
+      const accountId = String(account.id);
+      if (pinnedOrder.has(accountId)) {
         pinned.push(account);
       } else {
         unpinned.push(account);
@@ -269,12 +365,13 @@ const DashboardScreen = ({route, navigation}) => {
     });
     pinned.sort(
       (first, second) =>
-        pinnedOrder.get(first.id) - pinnedOrder.get(second.id)
+        pinnedOrder.get(String(first.id)) - pinnedOrder.get(String(second.id))
     );
     if (orderMap.size > 0) {
       unpinned.sort(
         (first, second) =>
-          (orderMap.get(first.id) ?? 0) - (orderMap.get(second.id) ?? 0)
+          (orderMap.get(String(first.id)) ?? 0) -
+          (orderMap.get(String(second.id)) ?? 0)
       );
     }
     return [...pinned, ...unpinned];
@@ -295,12 +392,13 @@ const DashboardScreen = ({route, navigation}) => {
       });
 
       console.log('Loaded accounts with balances:', accountsWithBalance);
-      setAccountOrderIds(accountsList.map(account => account.id));
+      const orderIds = accountsList.map(account => String(account.id));
+      setAccountOrderIds(orderIds);
       setAccounts(
         sortAccountsByPinned(
           accountsWithBalance,
           pinnedAccountIds,
-          accountsList.map(account => account.id)
+          orderIds
         )
       );
       // Note: Filtered earning/withdrawal data will be calculated by updateFilteredData()
@@ -531,10 +629,11 @@ const DashboardScreen = ({route, navigation}) => {
     if (!account) {
       return;
     }
-    const isPinned = pinnedAccountIds.includes(account.id);
+    const accountId = String(account.id);
+    const isPinned = pinnedAccountIds.includes(accountId);
     const updated = isPinned
-      ? pinnedAccountIds.filter(id => id !== account.id)
-      : [account.id, ...pinnedAccountIds];
+      ? pinnedAccountIds.filter(id => id !== accountId)
+      : [accountId, ...pinnedAccountIds];
     runPinReorderAnimation();
     setPinnedAccountIds(updated);
     setAccounts(current =>
@@ -607,7 +706,7 @@ const DashboardScreen = ({route, navigation}) => {
           onPress: async () => {
             try {
               await deleteAccountAndTransactions(selectedAccount.id);
-              ToastAndroid.show('Account deleted successfully', ToastAndroid.SHORT);
+              showToast('Account deleted successfully', 'success');
               loadAccounts(); // Refresh the list
             } catch (e) {
               Alert.alert('Error', 'Failed to delete account.');
@@ -655,7 +754,7 @@ const DashboardScreen = ({route, navigation}) => {
           <View style={styles.accountMetricsCard}>
             <View style={styles.dropdownGrid}>
               <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Quick Period</Text>
+                
                 <TouchableOpacity
                   style={[
                     styles.dropdown,
@@ -691,14 +790,14 @@ const DashboardScreen = ({route, navigation}) => {
                 </TouchableOpacity>
               </View>
               <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Month</Text>
+                
                 <TouchableOpacity
                   style={styles.dropdown}
                   onPress={() => setShowMonthDropdown(!showMonthDropdown)}>
                   <Text style={styles.dropdownText}>
                     {selectedMonth !== null
                       ? MONTHS[selectedMonth].label
-                      : 'Select'}
+                      : 'Month'}
                   </Text>
                   <Icon
                     name="chevron-down"
@@ -708,12 +807,12 @@ const DashboardScreen = ({route, navigation}) => {
                 </TouchableOpacity>
               </View>
               <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Year</Text>
+                
                 <TouchableOpacity
                   style={styles.dropdown}
                   onPress={() => setShowYearDropdown(!showYearDropdown)}>
                   <Text style={styles.dropdownText}>
-                    {selectedYear !== null ? selectedYear : 'Select'}
+                    {selectedYear !== null ? selectedYear : 'Year'}
                   </Text>
                   <Icon
                     name="chevron-down"
@@ -768,17 +867,10 @@ const DashboardScreen = ({route, navigation}) => {
           </View>
         </View>
       </View>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {!hasRecords && (
-          <View style={styles.noRecordsContainer}>
-            <Icon name="calendar-outline" size={48} color={colors.border} />
-            <Text style={styles.noRecordsText}>No records for this period</Text>
-            <Text style={styles.noRecordsSubtext}>
-              Try selecting a different period
-            </Text>
-          </View>
-        )}
-
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        pointerEvents={showTutorialStep1 ? 'none' : 'auto'}>
         {/* My Accounts */}
         <View style={styles.accountsSection}>
           <Text style={styles.sectionTitle}>My Accounts</Text>
@@ -798,7 +890,7 @@ const DashboardScreen = ({route, navigation}) => {
                   }}
                   onLongPress={() => openContextMenu(account)}>
                   <View style={styles.badgeContainer}>
-                    {pinnedAccountIds.includes(account.id) && (
+                    {pinnedAccountIds.includes(String(account.id)) && (
                       <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
                         <MaterialIcon name="push-pin" size={12} color={colors.white} style={{ transform: [{ rotate: '45deg' }] }} />
                       </View>
@@ -879,9 +971,34 @@ const DashboardScreen = ({route, navigation}) => {
         </View>
       </ScrollView>
 
+      {showTutorialStep1 && (
+        <Modal visible transparent animationType="fade">
+          <View style={styles.tutorialOverlay}>
+            <Text style={[styles.tutorialText, tutorialTextPosition]}>
+              Welcome {userName}
+              {'\n'}Add Your 1st Earning Account
+            </Text>
+            <View style={[styles.tutorialFabHighlight, tutorialFabPosition]}>
+              <View style={styles.tutorialFabRing} />
+              <TouchableOpacity
+                style={styles.tutorialFab}
+                onPress={handleAddAccountPress}>
+                <Icon name="person-add" size={22} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setShowAddAccountModal(true)}>
+        ref={fabRef}
+        style={[styles.fab, showTutorialStep1 && styles.fabHidden]}
+        onLayout={() => {
+          if (showTutorialStep1) {
+            updateFabLayout();
+          }
+        }}
+        onPress={handleAddAccountPress}>
         <Icon name="person-add" size={22} color={colors.white} />
       </TouchableOpacity>
 
@@ -893,6 +1010,7 @@ const DashboardScreen = ({route, navigation}) => {
           // Refresh accounts list
           console.log('Account added successfully - refreshing list');
           loadAccounts();
+          showToast('Account created successfully', 'success');
         }}
       />
 
@@ -1067,7 +1185,7 @@ const DashboardScreen = ({route, navigation}) => {
                 color={colors.text.primary}
               />
               <Text style={styles.contextMenuItemText}>
-                {pinnedAccountIds.includes(selectedAccount?.id)
+                {pinnedAccountIds.includes(String(selectedAccount?.id))
                   ? 'Unpin from Top'
                   : 'Pin to Top'}
               </Text>
@@ -1279,6 +1397,50 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 3},
     shadowOpacity: 0.2,
     shadowRadius: 4,
+  },
+  fabHidden: {
+    opacity: 0,
+  },
+  tutorialOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+  tutorialText: {
+    position: 'absolute',
+    fontSize: 20,
+    color: colors.white,
+    fontFamily: HANDWRITING_FONT,
+    letterSpacing: 0.4,
+    textAlign: 'left',
+  },
+  tutorialFabHighlight: {
+    position: 'absolute',
+    width: TUTORIAL_RING_SIZE,
+    height: TUTORIAL_RING_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tutorialFabRing: {
+    position: 'absolute',
+    width: TUTORIAL_RING_SIZE,
+    height: TUTORIAL_RING_SIZE,
+    borderRadius: TUTORIAL_RING_SIZE / 2,
+    borderWidth: 2,
+    borderColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  tutorialFab: {
+    width: TUTORIAL_FAB_SIZE,
+    height: TUTORIAL_FAB_SIZE,
+    borderRadius: TUTORIAL_FAB_SIZE / 2,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
   },
   // Accounts Section
   accountsSection: {

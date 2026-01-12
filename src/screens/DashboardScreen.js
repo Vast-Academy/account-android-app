@@ -23,6 +23,7 @@ import BsCashCoin from '../components/icons/BsCashCoin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import AddAccountModal from '../components/AddAccountModal';
 import FaArrowCircleUp from '../components/icons/FaArrowCircleUp';
+import BottomSheet from '../components/BottomSheet';
 import {
   initAccountsDatabase,
   getAllAccounts,
@@ -100,9 +101,8 @@ const DashboardScreen = ({route, navigation}) => {
   const [quickPeriod, setQuickPeriod] = useState('1month');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
-  const [showQuickDropdown, setShowQuickDropdown] = useState(false);
-  const [showMonthDropdown, setShowMonthDropdown] = useState(false);
-  const [showYearDropdown, setShowYearDropdown] = useState(false);
+  const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
+  const [bottomSheetContent, setBottomSheetContent] = useState(null);
 
   // Available years (will be populated from transactions)
   const [availableYears, setAvailableYears] = useState([]);
@@ -597,21 +597,21 @@ const DashboardScreen = ({route, navigation}) => {
     setQuickPeriod(period);
     setSelectedMonth(null);
     setSelectedYear(null);
-    setShowQuickDropdown(false);
+    setBottomSheetVisible(false);
     // Data will update via useEffect
   };
 
   // Handle Month selection
   const handleMonthSelect = month => {
     setSelectedMonth(month);
-    setShowMonthDropdown(false);
+    setBottomSheetVisible(false);
     // Data will update via useEffect if year is also selected
   };
 
   // Handle Year selection
   const handleYearSelect = year => {
     setSelectedYear(year);
-    setShowYearDropdown(false);
+    setBottomSheetVisible(false);
     // Data will update via useEffect if month is also selected
   };
 
@@ -747,6 +747,118 @@ const DashboardScreen = ({route, navigation}) => {
     }
   };
 
+  const renderBottomSheetContent = () => {
+    if (bottomSheetContent === 'quick') {
+      return (
+        <>
+          <Text style={styles.bottomSheetTitle}>Select Period</Text>
+          {QUICK_PERIODS.map(period => (
+            <TouchableOpacity
+              key={period.value}
+              style={[
+                styles.dropdownOption,
+                quickPeriod === period.value && styles.dropdownOptionActive,
+              ]}
+              onPress={() => handleQuickPeriodSelect(period.value)}>
+              <Text
+                style={[
+                  styles.dropdownOptionText,
+                  quickPeriod === period.value &&
+                    styles.dropdownOptionTextActive,
+                ]}>
+                {period.label}
+              </Text>
+              {quickPeriod === period.value && (
+                <Icon name="checkmark" size={18} color={colors.primary} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </>
+      );
+    }
+
+    if (bottomSheetContent === 'month') {
+      return (
+        <>
+          <Text style={styles.bottomSheetTitle}>Select Month</Text>
+          {selectedMonth !== null && (
+            <TouchableOpacity
+              style={styles.dropdownOptionClear}
+              onPress={() => {
+                setSelectedMonth(null);
+                setBottomSheetVisible(false);
+              }}>
+              <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
+              <Icon name="close-circle" size={18} color={colors.error} />
+            </TouchableOpacity>
+          )}
+          {MONTHS.map(month => (
+            <TouchableOpacity
+              key={month.value}
+              style={[
+                styles.dropdownOption,
+                selectedMonth === month.value && styles.dropdownOptionActive,
+              ]}
+              onPress={() => handleMonthSelect(month.value)}>
+              <Text
+                style={[
+                  styles.dropdownOptionText,
+                  selectedMonth === month.value &&
+                    styles.dropdownOptionTextActive,
+                ]}>
+                {month.label}
+              </Text>
+              {selectedMonth === month.value && (
+                <Icon name="checkmark" size={18} color={colors.primary} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </>
+      );
+    }
+
+    if (bottomSheetContent === 'year') {
+      return (
+        <>
+          <Text style={styles.bottomSheetTitle}>Select Year</Text>
+          {selectedYear !== null && (
+            <TouchableOpacity
+              style={styles.dropdownOptionClear}
+              onPress={() => {
+                setSelectedYear(null);
+                setBottomSheetVisible(false);
+              }}>
+              <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
+              <Icon name="close-circle" size={18} color={colors.error} />
+            </TouchableOpacity>
+          )}
+          {availableYears.map(year => (
+            <TouchableOpacity
+              key={year}
+              style={[
+                styles.dropdownOption,
+                selectedYear === year && styles.dropdownOptionActive,
+              ]}
+              onPress={() => handleYearSelect(year)}>
+              <Text
+                style={[
+                  styles.dropdownOptionText,
+                  selectedYear === year && styles.dropdownOptionTextActive,
+                ]}>
+                {year}
+              </Text>
+              {selectedYear === year && (
+                <Icon name="checkmark" size={18} color={colors.primary} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -764,7 +876,8 @@ const DashboardScreen = ({route, navigation}) => {
                   ]}
                   onPress={() => {
                     if (selectedMonth === null || selectedYear === null) {
-                      setShowQuickDropdown(!showQuickDropdown);
+                      setBottomSheetContent('quick');
+                      setBottomSheetVisible(true);
                     }
                   }}
                   disabled={selectedMonth !== null && selectedYear !== null}>
@@ -793,7 +906,10 @@ const DashboardScreen = ({route, navigation}) => {
                 
                 <TouchableOpacity
                   style={styles.dropdown}
-                  onPress={() => setShowMonthDropdown(!showMonthDropdown)}>
+                  onPress={() => {
+                    setBottomSheetContent('month');
+                    setBottomSheetVisible(true);
+                  }}>
                   <Text style={styles.dropdownText}>
                     {selectedMonth !== null
                       ? MONTHS[selectedMonth].label
@@ -810,7 +926,10 @@ const DashboardScreen = ({route, navigation}) => {
                 
                 <TouchableOpacity
                   style={styles.dropdown}
-                  onPress={() => setShowYearDropdown(!showYearDropdown)}>
+                  onPress={() => {
+                    setBottomSheetContent('year');
+                    setBottomSheetVisible(true);
+                  }}>
                   <Text style={styles.dropdownText}>
                     {selectedYear !== null ? selectedYear : 'Year'}
                   </Text>
@@ -1014,138 +1133,12 @@ const DashboardScreen = ({route, navigation}) => {
         }}
       />
 
-      {/* Quick Period Dropdown Modal */}
-      <Modal
-        visible={showQuickDropdown}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowQuickDropdown(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowQuickDropdown(false)}>
-          <View style={styles.dropdownModal}>
-            {QUICK_PERIODS.map(period => (
-              <TouchableOpacity
-                key={period.value}
-                style={[
-                  styles.dropdownOption,
-                  quickPeriod === period.value && styles.dropdownOptionActive,
-                ]}
-                onPress={() => handleQuickPeriodSelect(period.value)}>
-                <Text
-                  style={[
-                    styles.dropdownOptionText,
-                    quickPeriod === period.value &&
-                      styles.dropdownOptionTextActive,
-                  ]}>
-                  {period.label}
-                </Text>
-                {quickPeriod === period.value && (
-                  <Icon name="checkmark" size={18} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Month Dropdown Modal */}
-      <Modal
-        visible={showMonthDropdown}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowMonthDropdown(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowMonthDropdown(false)}>
-          <View style={styles.dropdownModalScrollable}>
-            <ScrollView showsVerticalScrollIndicator={true}>
-              {selectedMonth !== null && (
-                <TouchableOpacity
-                  style={styles.dropdownOptionClear}
-                  onPress={() => {
-                    setSelectedMonth(null);
-                    setShowMonthDropdown(false);
-                  }}>
-                  <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
-                  <Icon name="close-circle" size={18} color={colors.error} />
-                </TouchableOpacity>
-              )}
-              {MONTHS.map(month => (
-                <TouchableOpacity
-                  key={month.value}
-                  style={[
-                    styles.dropdownOption,
-                    selectedMonth === month.value && styles.dropdownOptionActive,
-                  ]}
-                  onPress={() => handleMonthSelect(month.value)}>
-                  <Text
-                    style={[
-                      styles.dropdownOptionText,
-                      selectedMonth === month.value &&
-                        styles.dropdownOptionTextActive,
-                    ]}>
-                    {month.label}
-                  </Text>
-                  {selectedMonth === month.value && (
-                    <Icon name="checkmark" size={18} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Year Dropdown Modal */}
-      <Modal
-        visible={showYearDropdown}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowYearDropdown(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowYearDropdown(false)}>
-          <View style={styles.dropdownModalScrollable}>
-            <ScrollView showsVerticalScrollIndicator={true}>
-              {selectedYear !== null && (
-                <TouchableOpacity
-                  style={styles.dropdownOptionClear}
-                  onPress={() => {
-                    setSelectedYear(null);
-                    setShowYearDropdown(false);
-                  }}>
-                  <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
-                  <Icon name="close-circle" size={18} color={colors.error} />
-                </TouchableOpacity>
-              )}
-              {availableYears.map(year => (
-                <TouchableOpacity
-                  key={year}
-                  style={[
-                    styles.dropdownOption,
-                    selectedYear === year && styles.dropdownOptionActive,
-                  ]}
-                  onPress={() => handleYearSelect(year)}>
-                  <Text
-                    style={[
-                      styles.dropdownOptionText,
-                      selectedYear === year && styles.dropdownOptionTextActive,
-                    ]}>
-                    {year}
-                  </Text>
-                  {selectedYear === year && (
-                    <Icon name="checkmark" size={18} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* Bottom Sheet for Period/Month/Year */}
+      <BottomSheet
+        visible={isBottomSheetVisible}
+        onClose={() => setBottomSheetVisible(false)}>
+        {renderBottomSheetContent()}
+      </BottomSheet>
 
       {/* Context Menu Modal */}
       <Modal
@@ -1643,6 +1636,14 @@ const styles = StyleSheet.create({
   dropdownOptionTextActive: {
     color: colors.primary,
     fontWeight: fontWeight.bold,
+  },
+  bottomSheetTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
   },
   dropdownOptionClear: {
     flexDirection: 'row',
