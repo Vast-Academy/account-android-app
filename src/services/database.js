@@ -1,4 +1,5 @@
 import { open } from 'react-native-quick-sqlite';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const db = open({ name: 'accountApp.db' });
 
@@ -58,6 +59,7 @@ export const saveUserData = (userData) => {
       ],
     );
     console.log('User data saved locally');
+    queueBackupFromStorage();
   } catch (error) {
     console.error('Save user data error:', error);
   }
@@ -106,6 +108,7 @@ export const saveTransaction = (transaction) => {
       ],
     );
     console.log('Transaction saved');
+    queueBackupFromStorage();
   } catch (error) {
     console.error('Save transaction error:', error);
   }

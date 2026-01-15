@@ -11,7 +11,7 @@ buildscript {
         google()
         mavenCentral()
     }
-     configurations.classpath {
+    configurations.classpath {
         resolutionStrategy {
             force("com.android.tools.build:gradle:8.10.1")
         }

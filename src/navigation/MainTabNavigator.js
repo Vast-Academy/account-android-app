@@ -11,11 +11,14 @@ import Header from '../components/Header';
 import {colors, fontSize} from '../utils/theme';
 import {auth} from '../config/firebase';
 import {saveUserData} from '../services/database';
+import {ensureDriveScopes} from '../services/driveService';
+import {performBackup} from '../services/backupService';
 
 const Tab = createBottomTabNavigator();
 
 const MainTabNavigator = ({route}) => {
-  const [user, setUser] = useState(route.params?.user || null);
+  const {user: initialUser, showTutorial} = route.params || {};
+  const [user, setUser] = useState(initialUser || null);
   const [showHeader, setShowHeader] = useState(true);
 
   useEffect(() => {
@@ -36,7 +39,19 @@ const MainTabNavigator = ({route}) => {
   };
 
   const handleBackupPress = () => {
-    Alert.alert('Backup', 'Backup functionality not yet implemented.');
+    const runBackup = async () => {
+      try {
+        await ensureDriveScopes();
+        const firebaseUid = await AsyncStorage.getItem('firebaseUid');
+        const email = await AsyncStorage.getItem('backup.accountEmail');
+        await performBackup({firebaseUid, accountEmail: email});
+        Alert.alert('Backup Complete', 'Your data has been backed up.');
+      } catch (error) {
+        console.error('Manual backup failed:', error);
+        Alert.alert('Backup Failed', 'Unable to backup right now.');
+      }
+    };
+    runBackup();
   };
 
   const handleProfileUpdate = async updates => {
@@ -94,7 +109,7 @@ const MainTabNavigator = ({route}) => {
         <Tab.Screen
           name="Dashboard"
           component={DashboardScreen}
-          initialParams={{user, showTutorial: route.params?.showTutorial}}
+          initialParams={{user, showTutorial}}
           options={{
             tabBarIcon: ({color, size}) => (
               <Icon name="home" size={size} color={color} />

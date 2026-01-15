@@ -1,4 +1,5 @@
 import {open} from 'react-native-quick-sqlite';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const DB_NAME = 'accountsDB.db';
 
@@ -53,6 +54,7 @@ export const createTransaction = async (accountId, amount, remark) => {
     // Update account balance
     await updateAccountBalance(accountId);
 
+    queueBackupFromStorage();
     return {success: true, insertId: result.insertId};
   } catch (error) {
     console.error('Failed to create transaction:', error);
@@ -141,6 +143,7 @@ export const deleteTransaction = async (transactionId, accountId) => {
     await updateAccountBalance(accountId);
 
     console.log('Transaction deleted successfully');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to delete transaction:', error);
@@ -154,6 +157,7 @@ export const deleteTransactionsByAccount = async (accountId) => {
     const db = getDB();
     db.execute('DELETE FROM transactions WHERE account_id = ?', [accountId]);
     console.log('Transactions deleted for account:', accountId);
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to delete account transactions:', error);
@@ -173,6 +177,7 @@ export const updateTransactionAmount = async (transactionId, accountId, amount) 
     await updateAccountBalance(accountId);
 
     console.log('Transaction amount updated:', transactionId);
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to update transaction amount:', error);
@@ -190,6 +195,7 @@ export const updateTransactionRemark = async (transactionId, remark) => {
     ]);
 
     console.log('Transaction remark updated:', transactionId);
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to update transaction remark:', error);

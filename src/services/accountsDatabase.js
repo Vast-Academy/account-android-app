@@ -1,5 +1,6 @@
 import {open} from 'react-native-quick-sqlite';
 import {deleteTransactionsByAccount} from './transactionsDatabase';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const DB_NAME = 'accountsDB.db';
 const LEGACY_RED_400 = '#F87171';
@@ -89,7 +90,21 @@ export const createAccount = async (accountName, accountType, icon, iconColor) =
       [accountName.trim(), accountType, icon || null, iconColor || null, timestamp, timestamp]
     );
 
+    try {
+      const countResult = db.execute('SELECT COUNT(*) as count FROM accounts');
+      const count = countResult.rows?._array?.[0]?.count ?? 0;
+      console.log('Accounts table count:', count);
+      const pathResult = db.execute('PRAGMA database_list');
+      const pathRow = pathResult.rows?._array?.find(row => row.name === 'main');
+      if (pathRow?.file) {
+        console.log('Accounts DB path:', pathRow.file);
+      }
+    } catch (countError) {
+      console.warn('Accounts count check failed:', countError);
+    }
+
     console.log('Account created successfully:', accountName);
+    queueBackupFromStorage();
     return {success: true, insertId: result.insertId};
   } catch (error) {
     console.error('Failed to create account:', error);
@@ -177,6 +192,7 @@ export const updateAccount = async (id, accountName, accountType) => {
     );
 
     console.log('Account updated successfully');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to update account:', error);
@@ -190,6 +206,7 @@ export const deleteAccount = async (id) => {
     const db = getDB();
     db.execute('DELETE FROM accounts WHERE id = ?', [id]);
     console.log('Account deleted successfully');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to delete account:', error);
@@ -207,6 +224,7 @@ export const renameAccount = async (id, newName) => {
       [newName.trim(), timestamp, id]
     );
     console.log('Account renamed successfully');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to rename account:', error);
@@ -222,6 +240,7 @@ export const deleteAccountAndTransactions = async (id) => {
     // Then, delete the account itself
     await deleteAccount(id);
     console.log(`Account ${id} and all its transactions deleted successfully.`);
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error(`Failed to delete account ${id} and its transactions:`, error);
@@ -235,6 +254,7 @@ export const clearAllAccountsData = async () => {
     const db = getDB();
     db.execute('DELETE FROM accounts');
     console.log('All accounts data cleared successfully.');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to clear all accounts data:', error);
@@ -277,6 +297,7 @@ export const setPrimaryAccount = async (accountId) => {
     );
 
     console.log('Primary account updated:', accountId);
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to set primary account:', error);
@@ -322,6 +343,7 @@ export const updateAccountPrimary = async (accountId, isPrimary) => {
       [isPrimary ? 1 : 0, timestamp, accountId]
     );
 
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to update primary status:', error);

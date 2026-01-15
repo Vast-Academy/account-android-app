@@ -42,8 +42,10 @@ const HomeScreen = ({ route, navigation }) => {
         style: 'destructive',
         onPress: async () => {
           try {
-            // Sign out from Google
-            await GoogleSignin.signOut();
+            const isSignedIn = await GoogleSignin.isSignedIn();
+            if (isSignedIn) {
+              await GoogleSignin.signOut();
+            }
 
             // Sign out from Firebase
             await auth().signOut();

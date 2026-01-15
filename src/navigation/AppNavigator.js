@@ -10,6 +10,7 @@ import AccountDetailScreen from '../screens/AccountDetailScreen';
 import LiabilityAccountDetailScreen from '../screens/LiabilityAccountDetailScreen';
 import LedgerContactDetailScreen from '../screens/LedgerContactDetailScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import BackupScreen from '../screens/BackupScreen';
 
 const Stack = createStackNavigator();
 
@@ -29,6 +30,7 @@ const AppNavigator = () => {
         <Stack.Screen name="LiabilityAccountDetail" component={LiabilityAccountDetailScreen} />
         <Stack.Screen name="LedgerContactDetail" component={LedgerContactDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="Backup" component={BackupScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -1,5 +1,6 @@
 import {open} from 'react-native-quick-sqlite';
 import {createTransaction} from './transactionsDatabase';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const DB_NAME = 'accountsDB.db';
 
@@ -152,6 +153,7 @@ export const createRecurringSchedule = async (
     );
 
     console.log('Recurring schedule created successfully');
+    queueBackupFromStorage();
     return {success: true, insertId: result.insertId};
   } catch (error) {
     console.error('Failed to create recurring schedule:', error);
@@ -235,6 +237,9 @@ export const processDueSchedules = async () => {
       console.log(`Processed schedule ${schedule.id}, next execution: ${new Date(nextExecution)}`);
     }
 
+    if (schedules.length > 0) {
+      queueBackupFromStorage();
+    }
     return schedules.length;
   } catch (error) {
     console.error('Failed to process due schedules:', error);
@@ -248,6 +253,7 @@ export const deactivateSchedule = (scheduleId) => {
     const db = getDB();
     db.execute('UPDATE recurring_schedules SET is_active = 0 WHERE id = ?', [scheduleId]);
     console.log('Schedule deactivated successfully');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to deactivate schedule:', error);
@@ -261,6 +267,7 @@ export const deleteRecurringSchedule = (scheduleId) => {
     const db = getDB();
     db.execute('DELETE FROM recurring_schedules WHERE id = ?', [scheduleId]);
     console.log('Recurring schedule deleted successfully');
+    queueBackupFromStorage();
     return {success: true};
   } catch (error) {
     console.error('Failed to delete recurring schedule:', error);

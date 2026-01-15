@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import {useFocusEffect} from '@react-navigation/native';
 import {
   View,
@@ -16,6 +16,7 @@ import {
   PanResponder,
   BackHandler,
   TextInput,
+  NativeModules,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import ImagePicker from 'react-native-image-crop-picker';
@@ -23,9 +24,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {auth} from '../config/firebase';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
-import { clearLocalData } from '../services/database';
-import { clearAllAccountsData } from '../services/accountsDatabase';
-import { clearAllLedgerData } from '../services/ledgerDatabase';
+import {clearLocalData} from '../services/database';
+import {clearAllAccountsData} from '../services/accountsDatabase';
+import {clearAllLedgerData} from '../services/ledgerDatabase';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const OCCUPATION_OPTIONS = [
   {label: 'Business Owner', value: 'Business Owner'},
@@ -232,10 +234,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   }, [profileVisible]);
 
   React.useEffect(() => {
-    profileBackRef.current = handleProfileBack;
-  }, [handleProfileBack]);
-
-  React.useEffect(() => {
     const loadUser = async () => {
       try {
         const stored = await AsyncStorage.getItem('user');
@@ -277,20 +275,24 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       {
         text: 'Logout',
         style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await auth().signOut();
-                      await GoogleSignin.signOut();
-                      await AsyncStorage.clear();
-                      await clearLocalData();
-                      await clearAllAccountsData();
-                      await clearAllLedgerData();
-                      navigation.replace('Login');
-                    } catch (error) {
-                      console.error('Logout error:', error);
-                      Alert.alert('Error', 'Failed to logout');
-                    }
-                  },      },
+        onPress: async () => {
+          try {
+            // Sign out from Google (safe to call even if not signed in)
+            await GoogleSignin.signOut();
+            // Sign out from Firebase
+            await auth().signOut();
+            // Clear local storage
+            await AsyncStorage.clear();
+            await clearLocalData();
+            await clearAllAccountsData();
+            await clearAllLedgerData();
+            navigation.replace('Login');
+          } catch (error) {
+            console.error('Logout error:', error);
+            Alert.alert('Error', 'Failed to logout');
+          }
+        },
+      },
     ]);
   };
 
@@ -359,6 +361,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       });
       if (result?.path) {
         setDraftPhoto(normalizeImageUri(result.path));
+        return;
       }
     } catch (error) {
       if (error?.code === 'E_PICKER_CANCELLED') {
@@ -412,6 +415,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       };
       setCurrentUser(updatedUser);
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      queueBackupFromStorage();
       closeProfile();
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -477,13 +481,22 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     ]);
   }, [profileVisible, hasProfileChanges, closeProfile, handleSaveProfile]);
 
+  React.useEffect(() => {
+    profileBackRef.current = handleProfileBack;
+  }, [handleProfileBack]);
+
   const menuItems = [
+    {
+      id: 'profile',
+      title: 'Profile',
+      icon: 'person-outline',
+      onPress: openProfile,
+    },
     {
       id: 'backup',
       title: 'Backup & Restore',
       icon: 'cloud-upload-outline',
-      onPress: () =>
-        Alert.alert('Coming Soon', 'Backup & Restore feature coming soon'),
+      onPress: () => navigation.navigate('Backup'),
     },
     {
       id: 'settings',
@@ -505,7 +518,11 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       id: 'about',
       title: 'About',
       icon: 'information-circle-outline',
-      onPress: () => Alert.alert('Account App', 'Version 1.0.0'),
+      onPress: () => {
+        const versionName = NativeModules?.VersionInfo?.versionName ?? 'unknown';
+        const versionCode = NativeModules?.VersionInfo?.versionCode ?? 'unknown';
+        Alert.alert('Account App', `Version ${versionName} (${versionCode})`);
+      },
     },
   ];
 
@@ -548,7 +565,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   );
 
   // Handle gesture-based back navigation (swipe from edge)
-  useEffect(() => {
+  React.useEffect(() => {
     const unsubscribeNavigation = navigation.addListener('beforeRemove', (e) => {
       if (profileVisibleRef.current) {
         e.preventDefault();
@@ -732,6 +749,16 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               />
             </TouchableOpacity>
 
+            <Text style={styles.profileLabel}>DOB</Text>
+            <TextInput
+              style={styles.profileInput}
+              value={draftDob}
+              onChangeText={setDraftDob}
+              placeholder="DD/MM/YYYY"
+              keyboardType="numbers-and-punctuation"
+              editable={!saving}
+            />
+
             <Text style={styles.profileLabel}>Occupation</Text>
             <TouchableOpacity
               style={styles.occupationPicker}
@@ -771,11 +798,11 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               )}
             </TouchableOpacity>
           </ScrollView>
-      <Modal
-        visible={photoPreviewVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPhotoPreviewVisible(false)}>
+          <Modal
+            visible={photoPreviewVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setPhotoPreviewVisible(false)}>
             <View style={styles.previewOverlay}>
               <TouchableOpacity
                 style={styles.previewBackdrop}

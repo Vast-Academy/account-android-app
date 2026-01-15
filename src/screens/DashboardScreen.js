@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Modal,
   Platform,
-  ToastAndroid,
   Alert,
   LayoutAnimation,
   UIManager,
@@ -24,6 +23,7 @@ import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import AddAccountModal from '../components/AddAccountModal';
 import FaArrowCircleUp from '../components/icons/FaArrowCircleUp';
 import BottomSheet from '../components/BottomSheet';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 import {
   initAccountsDatabase,
   getAllAccounts,
@@ -89,7 +89,7 @@ const renderAccountIcon = (iconName, size, color) => {
 };
 
 const DashboardScreen = ({route, navigation}) => {
-  const {user, showTutorial} = route.params || {};
+  const {user} = route.params || {};
   const userNameRaw =
     user?.displayName ||
     user?.name ||
@@ -115,6 +115,7 @@ const DashboardScreen = ({route, navigation}) => {
   // Other states
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [accounts, setAccounts] = useState([]);
+  const [isAccountsLoaded, setIsAccountsLoaded] = useState(false);
   const [pinnedAccountIds, setPinnedAccountIds] = useState([]);
   const [accountOrderIds, setAccountOrderIds] = useState([]);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
@@ -127,8 +128,15 @@ const DashboardScreen = ({route, navigation}) => {
 
   const fabRef = useRef(null);
 
+  const netBalance = React.useMemo(() => {
+    return accounts.reduce((total, account) => {
+      const balance = Number(account?.balance) || 0;
+      return total + balance;
+    }, 0);
+  }, [accounts]);
+
   const showTutorialStep1 =
-    Boolean(showTutorial) && accounts.length === 0 && !showAddAccountModal;
+    isAccountsLoaded && accounts.length === 0 && !showAddAccountModal;
 
   const handleAddAccountPress = () => {
     setShowAddAccountModal(true);
@@ -404,6 +412,8 @@ const DashboardScreen = ({route, navigation}) => {
       // Note: Filtered earning/withdrawal data will be calculated by updateFilteredData()
     } catch (error) {
       console.error('Failed to load accounts:', error);
+    } finally {
+      setIsAccountsLoaded(true);
     }
   };
 
@@ -441,6 +451,17 @@ const DashboardScreen = ({route, navigation}) => {
       console.error('Failed to generate years:', error);
       setAvailableYears([new Date().getFullYear()]);
     }
+  };
+
+  const isTransferTransaction = txn => {
+    const remark = String(txn?.remark || '').trim().toLowerCase();
+    return (
+      remark.startsWith('transferred to ') ||
+      remark.startsWith('transferred from ') ||
+      remark.startsWith('requested to ') ||
+      remark.startsWith('requested from ') ||
+      remark.startsWith('requested by ')
+    );
   };
 
   // Calculate data for Quick Period
@@ -512,10 +533,13 @@ const DashboardScreen = ({route, navigation}) => {
           ) {
             recordCount++;
             const amount = Number(txn.amount) || 0;
+            const isTransfer = isTransferTransaction(txn);
+            if (isTransfer) {
+              return;
+            }
             if (amount > 0 && account.account_type === 'earning') {
               earning += amount;
-            }
-            if (amount < 0) {
+            } else if (amount < 0) {
               withdrawals += Math.abs(amount);
             }
           }
@@ -560,10 +584,13 @@ const DashboardScreen = ({route, navigation}) => {
           ) {
             recordCount++;
             const amount = Number(txn.amount) || 0;
+            const isTransfer = isTransferTransaction(txn);
+            if (isTransfer) {
+              return;
+            }
             if (amount > 0 && account.account_type === 'earning') {
               earning += amount;
-            }
-            if (amount < 0) {
+            } else if (amount < 0) {
               withdrawals += Math.abs(amount);
             }
           }
@@ -615,138 +642,6 @@ const DashboardScreen = ({route, navigation}) => {
     // Data will update via useEffect if month is also selected
   };
 
-  const formatCurrency = amount => {
-    return `\u20B9 ${amount.toLocaleString('en-IN')}`;
-  };
-
-  const formatCurrencyRupee = amount => {
-    const sign = amount < 0 ? '-' : '';
-    const absAmount = Math.abs(amount);
-    return `${sign}\u20B9 ${absAmount.toLocaleString('en-IN')}`;
-  };
-
-  const togglePinAccount = async account => {
-    if (!account) {
-      return;
-    }
-    const accountId = String(account.id);
-    const isPinned = pinnedAccountIds.includes(accountId);
-    const updated = isPinned
-      ? pinnedAccountIds.filter(id => id !== accountId)
-      : [accountId, ...pinnedAccountIds];
-    runPinReorderAnimation();
-    setPinnedAccountIds(updated);
-    setAccounts(current =>
-      sortAccountsByPinned(current, updated, accountOrderIds)
-    );
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(
-        isPinned ? 'Account unpinned' : 'Account pinned to top',
-        ToastAndroid.SHORT
-      );
-    } else {
-      Alert.alert(
-        isPinned ? 'Unpinned' : 'Pinned',
-        isPinned ? 'Account unpinned' : 'Account pinned to top'
-      );
-    }
-    try {
-      await AsyncStorage.setItem('pinnedAccountIds', JSON.stringify(updated));
-    } catch (error) {
-      console.error('Failed to save pinned accounts:', error);
-    }
-  };
-
-  const openContextMenu = account => {
-    setSelectedAccount(account);
-    setContextMenuVisible(true);
-    Animated.parallel([
-      Animated.timing(overlayOpacity, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.spring(contentTranslateY, {
-        toValue: 0,
-        tension: 65,
-        friction: 10,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-
-  const closeContextMenu = () => {
-    Animated.parallel([
-      Animated.timing(overlayOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(contentTranslateY, {
-        toValue: 300,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setContextMenuVisible(false);
-      setSelectedAccount(null);
-    });
-  };
-
-  const handleDeleteAccount = () => {
-    if (!selectedAccount) return;
-    Alert.alert(
-      'Delete Account',
-      `Are you sure you want to delete the account "${selectedAccount.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
-      [
-        {text: 'Cancel', style: 'cancel', onPress: closeContextMenu},
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAccountAndTransactions(selectedAccount.id);
-              showToast('Account deleted successfully', 'success');
-              loadAccounts(); // Refresh the list
-            } catch (e) {
-              Alert.alert('Error', 'Failed to delete account.');
-            } finally {
-              closeContextMenu();
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const openRenameModal = () => {
-    if (!selectedAccount) return;
-    setNewAccountName(selectedAccount?.account_name || ''); // Ensure newAccountName is always a string
-    setRenameModalVisible(true);
-    closeContextMenu();
-  };
-
-  const closeRenameModal = () => {
-    setRenameModalVisible(false);
-    setNewAccountName('');
-  };
-
-  const handleSaveAccountName = async () => {
-    if (!selectedAccount || !newAccountName.trim()) {
-      Alert.alert('Invalid Name', 'Account name cannot be empty.');
-      return;
-    }
-    try {
-      await renameAccount(selectedAccount.id, newAccountName.trim());
-      ToastAndroid.show('Account renamed successfully', ToastAndroid.SHORT);
-      loadAccounts(); // Refresh the list
-    } catch (e) {
-      Alert.alert('Error', 'Failed to rename account.');
-    } finally {
-      closeRenameModal();
-    }
-  };
-
   const renderBottomSheetContent = () => {
     if (bottomSheetContent === 'quick') {
       return (
@@ -763,8 +658,7 @@ const DashboardScreen = ({route, navigation}) => {
               <Text
                 style={[
                   styles.dropdownOptionText,
-                  quickPeriod === period.value &&
-                    styles.dropdownOptionTextActive,
+                  quickPeriod === period.value && styles.dropdownOptionTextActive,
                 ]}>
                 {period.label}
               </Text>
@@ -859,6 +753,132 @@ const DashboardScreen = ({route, navigation}) => {
     return null;
   };
 
+  const formatCurrency = amount => {
+    return `\u20B9 ${amount.toLocaleString('en-IN')}`;
+  };
+
+  const formatCurrencyRupee = amount => {
+    const sign = amount < 0 ? '-' : '';
+    const absAmount = Math.abs(amount);
+    return `${sign}\u20B9 ${absAmount.toLocaleString('en-IN')}`;
+  };
+
+  const togglePinAccount = async account => {
+    if (!account) {
+      return;
+    }
+    const accountId = String(account.id);
+    const isPinned = pinnedAccountIds.includes(accountId);
+    const updated = isPinned
+      ? pinnedAccountIds.filter(id => id !== accountId)
+      : [accountId, ...pinnedAccountIds];
+    runPinReorderAnimation();
+    setPinnedAccountIds(updated);
+    setAccounts(current =>
+      sortAccountsByPinned(current, updated, accountOrderIds)
+    );
+    showToast(
+      isPinned ? 'Account unpinned' : 'Account pinned to top',
+      'success'
+    );
+    try {
+      await AsyncStorage.setItem('pinnedAccountIds', JSON.stringify(updated));
+      queueBackupFromStorage();
+    } catch (error) {
+      console.error('Failed to save pinned accounts:', error);
+    }
+  };
+
+  const openContextMenu = account => {
+    setSelectedAccount(account);
+    setContextMenuVisible(true);
+    Animated.parallel([
+      Animated.timing(overlayOpacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.spring(contentTranslateY, {
+        toValue: 0,
+        tension: 65,
+        friction: 10,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeContextMenu = () => {
+    Animated.parallel([
+      Animated.timing(overlayOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentTranslateY, {
+        toValue: 300,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setContextMenuVisible(false);
+      setSelectedAccount(null);
+    });
+  };
+
+  const handleDeleteAccount = () => {
+    if (!selectedAccount) return;
+    Alert.alert(
+      'Delete Account',
+      `Are you sure you want to delete the account "${selectedAccount.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
+      [
+        {text: 'Cancel', style: 'cancel', onPress: closeContextMenu},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccountAndTransactions(selectedAccount.id);
+              showToast('Account deleted successfully', 'success');
+              loadAccounts(); // Refresh the list
+            } catch (e) {
+              Alert.alert('Error', 'Failed to delete account.');
+            } finally {
+              closeContextMenu();
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const openRenameModal = () => {
+    if (!selectedAccount) return;
+    setNewAccountName(selectedAccount?.account_name || ''); // Ensure newAccountName is always a string
+    setRenameModalVisible(true);
+    closeContextMenu();
+  };
+
+  const closeRenameModal = () => {
+    setRenameModalVisible(false);
+    setNewAccountName('');
+  };
+
+  const handleSaveAccountName = async () => {
+    if (!selectedAccount || !newAccountName.trim()) {
+      Alert.alert('Invalid Name', 'Account name cannot be empty.');
+      return;
+    }
+    try {
+      await renameAccount(selectedAccount.id, newAccountName.trim());
+      showToast('Account renamed successfully', 'success');
+      loadAccounts(); // Refresh the list
+    } catch (e) {
+      Alert.alert('Error', 'Failed to rename account.');
+    } finally {
+      closeRenameModal();
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -866,7 +886,7 @@ const DashboardScreen = ({route, navigation}) => {
           <View style={styles.accountMetricsCard}>
             <View style={styles.dropdownGrid}>
               <View style={styles.dropdownContainer}>
-                
+                <Text style={styles.dropdownLabel}>Quick Period</Text>
                 <TouchableOpacity
                   style={[
                     styles.dropdown,
@@ -903,7 +923,7 @@ const DashboardScreen = ({route, navigation}) => {
                 </TouchableOpacity>
               </View>
               <View style={styles.dropdownContainer}>
-                
+                <Text style={styles.dropdownLabel}>Month</Text>
                 <TouchableOpacity
                   style={styles.dropdown}
                   onPress={() => {
@@ -923,7 +943,7 @@ const DashboardScreen = ({route, navigation}) => {
                 </TouchableOpacity>
               </View>
               <View style={styles.dropdownContainer}>
-                
+                <Text style={styles.dropdownLabel}>Year</Text>
                 <TouchableOpacity
                   style={styles.dropdown}
                   onPress={() => {
@@ -942,7 +962,7 @@ const DashboardScreen = ({route, navigation}) => {
               </View>
             </View>
             <View style={styles.accountMetricsRow}>
-              <View style={styles.accountMetricHalf}>
+              <View style={styles.accountMetricThird}>
                 <View style={styles.accountMetricLabelRow}>
                   <View
                     style={[
@@ -951,7 +971,7 @@ const DashboardScreen = ({route, navigation}) => {
                     ]}>
                     <FaArrowCircleUp size={24} color={colors.success} />
                   </View>
-                  <Text style={styles.accountMetricLabel}>Total Earning</Text>
+                  <Text style={styles.accountMetricLabel}>Earning</Text>
                 </View>
                 <Text
                   style={[
@@ -961,8 +981,8 @@ const DashboardScreen = ({route, navigation}) => {
                   {formatCurrencyRupee(filteredEarning)}
                 </Text>
               </View>
-                <View style={styles.accountMetricDivider} />
-              <View style={styles.accountMetricHalf}>
+              <View style={styles.accountMetricDivider} />
+              <View style={styles.accountMetricThird}>
                 <View style={styles.accountMetricLabelRow}>
                   <View
                     style={[
@@ -971,7 +991,7 @@ const DashboardScreen = ({route, navigation}) => {
                     ]}>
                     <FaArrowCircleDown size={24} color={colors.error} />
                   </View>
-                  <Text style={styles.accountMetricLabel}>Total Expenses</Text>
+                  <Text style={styles.accountMetricLabel}>Expenses</Text>
                 </View>
                 <Text
                   style={[
@@ -980,6 +1000,26 @@ const DashboardScreen = ({route, navigation}) => {
                     styles.accountMetricNegative,
                   ]}>
                   {formatCurrencyRupee(filteredWithdrawals)}
+                </Text>
+              </View>
+              <View style={styles.accountMetricDivider} />
+              <View style={styles.accountMetricThird}>
+                <View style={styles.accountMetricLabelRow}>
+                  <View
+                    style={[
+                      styles.accountMetricIcon,
+                      {backgroundColor: colors.white},
+                    ]}>
+                    <Icon name="wallet" size={24} color="#2196F3" />
+                  </View>
+                  <Text style={styles.accountMetricLabel}>Net Balance</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.accountMetricValue,
+                    styles.accountMetricValueIndented,
+                  ]}>
+                  {formatCurrencyRupee(netBalance)}
                 </Text>
               </View>
             </View>
@@ -1333,7 +1373,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  accountMetricHalf: {
+  accountMetricThird: {
     flex: 1,
   },
   accountMetricDivider: {
@@ -1356,7 +1396,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   accountMetricValueIndented: {
-    marginLeft: METRIC_LABEL_OFFSET,
+    textAlign: 'center',
   },
   accountMetricIconNegative: {
     backgroundColor: colors.error,

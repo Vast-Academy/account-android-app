@@ -19,6 +19,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import BottomSheet from '../components/BottomSheet';
+import {useUniversalToast} from '../hooks/useToast';
 import {
   initTransactionsDatabase,
   createTransaction,
@@ -26,7 +27,12 @@ import {
   calculateAccountBalance,
   deleteTransactionsByAccount,
 } from '../services/transactionsDatabase';
-import {deleteAccount, getAccountsByType} from '../services/accountsDatabase';
+import {
+  deleteAccount,
+  getAccountsByType,
+  getPrimaryEarningAccount,
+  renameAccount,
+} from '../services/accountsDatabase';
 
 const QUICK_PERIODS = [
   {label: 'Last 5 Days', value: '1week'},
@@ -60,6 +66,7 @@ const DEFAULT_MONTH_START_DAY = 1;
 const METRIC_ICON_SIZE = 28;
 const METRIC_LABEL_GAP = 6;
 const METRIC_LABEL_OFFSET = METRIC_ICON_SIZE + METRIC_LABEL_GAP;
+const LOW_BALANCE_PREF_KEY = 'liabilityLowBalancePref';
 
 const withAlpha = (hex, alpha) => {
   if (!hex || typeof hex !== 'string') {
@@ -113,8 +120,15 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   const [requestTarget, setRequestTarget] = useState(null);
   const [requestFieldHeight, setRequestFieldHeight] = useState(0);
   const [requestAccountWidth, setRequestAccountWidth] = useState(0);
-  const [lowBalanceVisible, setLowBalanceVisible] = useState(false);
-  const [lowBalanceMessage, setLowBalanceMessage] = useState('');
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [lowBalancePromptVisible, setLowBalancePromptVisible] = useState(false);
+  const [rememberLowBalanceChoice, setRememberLowBalanceChoice] = useState(false);
+  const [lowBalancePreference, setLowBalancePreference] = useState(null);
+  const [pendingWithdrawAmount, setPendingWithdrawAmount] = useState(null);
+  const [pendingWithdrawTotal, setPendingWithdrawTotal] = useState(null);
+  const [primaryEarningAccount, setPrimaryEarningAccount] = useState(null);
   const [quickPeriod, setQuickPeriod] = useState('1month');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
@@ -124,10 +138,10 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   const [filteredAdded, setFilteredAdded] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
+  const {showUniversalToast} = useUniversalToast();
   const scrollViewRef = useRef(null);
   const requestAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
-  const lowBalanceTimerRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
 
   const loadTransactions = useCallback(() => {
@@ -179,7 +193,32 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   }, [transactions]);
 
   useEffect(() => {
-    if (withdrawModalVisible || requestModalVisible) {
+    if (!account?.id) {
+      setLowBalancePreference(null);
+      return;
+    }
+    let isActive = true;
+    AsyncStorage.getItem(`${LOW_BALANCE_PREF_KEY}:${account.id}`)
+      .then(value => {
+        if (!isActive) {
+          return;
+        }
+        if (value === 'auto' || value === 'never') {
+          setLowBalancePreference(value);
+        } else {
+          setLowBalancePreference(null);
+        }
+      })
+      .catch(error => {
+        console.error('Failed to load low balance preference:', error);
+      });
+    return () => {
+      isActive = false;
+    };
+  }, [account?.id]);
+
+  useEffect(() => {
+    if (withdrawModalVisible || requestModalVisible || renameModalVisible) {
       Animated.timing(modalSlideAnim, {
         toValue: 1,
         duration: 240,
@@ -189,7 +228,12 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     } else {
       modalSlideAnim.setValue(0);
     }
-  }, [withdrawModalVisible, requestModalVisible, modalSlideAnim]);
+  }, [
+    withdrawModalVisible,
+    requestModalVisible,
+    renameModalVisible,
+    modalSlideAnim,
+  ]);
 
   useEffect(() => {
     if (!requestModalVisible) {
@@ -214,14 +258,6 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
       setRequestTarget(null);
     }
   }, [requestModalVisible]);
-
-  useEffect(() => {
-    return () => {
-      if (lowBalanceTimerRef.current) {
-        clearTimeout(lowBalanceTimerRef.current);
-      }
-    };
-  }, []);
 
   const focusWithdrawAmountInput = useCallback(() => {
     const focus = () => withdrawAmountInputRef.current?.focus();
@@ -263,18 +299,195 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     return () => clearTimeout(timer);
   }, [requestModalVisible, focusRequestAmountInput]);
 
+  const openRenameModal = () => {
+    setNewAccountName(account.account_name || '');
+    setRenameModalVisible(true);
+  };
+
+  const closeRenameModal = () => {
+    setRenameModalVisible(false);
+    setNewAccountName('');
+  };
+
+  const handleSaveAccountName = async () => {
+    if (!account?.id || !newAccountName.trim()) {
+      Alert.alert('Invalid Name', 'Account name cannot be empty.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await renameAccount(account.id, newAccountName.trim());
+      navigation.setParams({
+        account: {
+          ...account,
+          account_name: newAccountName.trim(),
+        },
+      });
+      showUniversalToast('Account renamed successfully', 'success');
+      closeRenameModal();
+    } catch (error) {
+      console.error('Failed to rename account:', error);
+      Alert.alert('Error', 'Failed to rename account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestFromPrimaryEarning = async (
+    amountValue,
+    note,
+    {finalizeWithdrawal = false, withdrawalAmount = null} = {}
+  ) => {
+    const primary = getPrimaryEarningAccount();
+    if (!primary) {
+      Alert.alert(
+        'No Primary Account',
+        'Please set a primary earning account first.'
+      );
+      return false;
+    }
+    setPrimaryEarningAccount(primary);
+    setLoading(true);
+    try {
+      const earningBalance = calculateAccountBalance(primary.id);
+      if (earningBalance < amountValue) {
+        showUniversalToast(
+          `Low balance on ${primary.account_name}.`,
+          'error'
+        );
+        return false;
+      }
+      const trimmedNote = String(note || '').trim();
+      const fromRemark = trimmedNote
+        ? `Requested by ${account.account_name} - ${trimmedNote}`
+        : `Requested by ${account.account_name}`;
+      const toRemark = trimmedNote
+        ? `Requested from ${primary.account_name} - ${trimmedNote}`
+        : `Requested from ${primary.account_name}`;
+      await createTransaction(primary.id, -amountValue, fromRemark);
+      await createTransaction(account.id, amountValue, toRemark);
+      if (finalizeWithdrawal) {
+        const withdrawalRemark = String(note || '').trim();
+        const finalAmount =
+          withdrawalAmount !== null ? withdrawalAmount : amountValue;
+        await createTransaction(account.id, -finalAmount, withdrawalRemark);
+      }
+      setWithdrawAmount('');
+      setWithdrawNote('');
+      loadTransactions();
+      showUniversalToast(
+        `Amount requested from ${primary.account_name}.`,
+        'success'
+      );
+      return true;
+    } catch (error) {
+      console.error('Failed to request amount:', error);
+      Alert.alert('Error', 'Failed to request amount. Please try again.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveLowBalancePreference = async value => {
+    if (!account?.id) {
+      return;
+    }
+    try {
+      await AsyncStorage.setItem(
+        `${LOW_BALANCE_PREF_KEY}:${account.id}`,
+        value
+      );
+      setLowBalancePreference(value);
+    } catch (error) {
+      console.error('Failed to save low balance preference:', error);
+    }
+  };
+
+  const closeLowBalancePrompt = () => {
+    setLowBalancePromptVisible(false);
+    setPendingWithdrawAmount(null);
+    setPendingWithdrawTotal(null);
+  };
+
+  const handleLowBalancePromptYes = async () => {
+    if (!pendingWithdrawAmount) {
+      closeLowBalancePrompt();
+      return;
+    }
+    if (rememberLowBalanceChoice) {
+      await saveLowBalancePreference('auto');
+    }
+    const success = await requestFromPrimaryEarning(
+      pendingWithdrawAmount,
+      withdrawNote,
+      {
+        finalizeWithdrawal: true,
+        withdrawalAmount:
+          pendingWithdrawTotal !== null
+            ? pendingWithdrawTotal
+            : pendingWithdrawAmount,
+      }
+    );
+    closeLowBalancePrompt();
+    if (success) {
+      setWithdrawModalVisible(false);
+    }
+  };
+
+  const handleLowBalancePromptNo = async () => {
+    if (rememberLowBalanceChoice) {
+      await saveLowBalancePreference('never');
+    }
+    closeLowBalancePrompt();
+    showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
+  };
+
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
       return false;
     }
 
+    const amountValue = Math.abs(parseFloat(withdrawAmount));
+    if (amountValue > totalBalance) {
+      const shortfall = Math.max(0, amountValue - totalBalance);
+      if (lowBalancePreference === 'never') {
+        showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
+        return false;
+      }
+      if (lowBalancePreference === 'auto') {
+        const success = await requestFromPrimaryEarning(
+          shortfall,
+          withdrawNote,
+          {finalizeWithdrawal: true, withdrawalAmount: amountValue}
+        );
+        if (success) {
+          setWithdrawModalVisible(false);
+        }
+        return success;
+      }
+      const primary = getPrimaryEarningAccount();
+      if (!primary) {
+        Alert.alert(
+          'No Primary Account',
+          'Please set a primary earning account first.'
+        );
+        return false;
+      }
+      setPrimaryEarningAccount(primary);
+      setPendingWithdrawAmount(shortfall);
+      setPendingWithdrawTotal(amountValue);
+      setRememberLowBalanceChoice(false);
+      setLowBalancePromptVisible(true);
+      return false;
+    }
+
     setLoading(true);
     try {
-      const amountValue = Math.abs(parseFloat(withdrawAmount));
       const remark = withdrawNote.trim();
       await createTransaction(account.id, -amountValue, remark);
-      Alert.alert('Success', 'Transaction added successfully!');
+      showUniversalToast('Withdrawal recorded.', 'success');
       setWithdrawAmount('');
       setWithdrawNote('');
       loadTransactions();
@@ -317,16 +530,10 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     try {
       const earningBalance = calculateAccountBalance(earningAccount.id);
       if (earningBalance < amountValue) {
-        setLowBalanceMessage(
-          `Low balance on ${earningAccount.account_name}.`
+        showUniversalToast(
+          `Low balance on ${earningAccount.account_name}.`,
+          'error'
         );
-        setLowBalanceVisible(true);
-        if (lowBalanceTimerRef.current) {
-          clearTimeout(lowBalanceTimerRef.current);
-        }
-        lowBalanceTimerRef.current = setTimeout(() => {
-          setLowBalanceVisible(false);
-        }, 1600);
         return;
       }
 
@@ -337,21 +544,16 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
       const toRemark = trimmedNote
         ? `Requested from ${earningAccount.account_name} - ${trimmedNote}`
         : `Requested from ${earningAccount.account_name}`;
-      await createTransaction(
-        earningAccount.id,
-        -amountValue,
-        fromRemark
-      );
-      await createTransaction(
-        account.id,
-        amountValue,
-        toRemark
-      );
+      await createTransaction(earningAccount.id, -amountValue, fromRemark);
+      await createTransaction(account.id, amountValue, toRemark);
       setRequestAmount('');
       setRequestNote('');
       setRequestSelectVisible(false);
       loadTransactions();
-      Alert.alert('Success', 'Request completed successfully!');
+      showUniversalToast(
+        `Amount requested from ${earningAccount.account_name}.`,
+        'success'
+      );
     } catch (error) {
       console.error('Failed to request amount:', error);
       Alert.alert('Error', 'Failed to request amount. Please try again.');
@@ -776,30 +978,7 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
           </Text>
         <TouchableOpacity
           onPress={() => {
-            Alert.alert(
-              'Delete Account',
-              'Are you sure you want to delete this account? This will remove all transactions.',
-              [
-                {text: 'Cancel', style: 'cancel'},
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteTransactionsByAccount(account.id);
-                      await deleteAccount(account.id);
-                      navigation.goBack();
-                    } catch (error) {
-                      console.error('Failed to delete account:', error);
-                      Alert.alert(
-                        'Error',
-                        'Failed to delete account. Please try again.'
-                      );
-                    }
-                  },
-                },
-              ]
-            );
+            setMenuVisible(true);
           }}
           style={styles.menuButton}>
           <Icon name="ellipsis-vertical" size={22} color={colors.text.primary} />
@@ -938,13 +1117,68 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
         <View style={styles.historySection}>{renderTransactions()}</View>
       </ScrollView>
 
-      {lowBalanceVisible && (
-        <View style={styles.toastContainer}>
-          <View style={styles.toast}>
-            <Text style={styles.toastText}>{lowBalanceMessage}</Text>
+      <Modal
+        visible={lowBalancePromptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeLowBalancePrompt}>
+        <View style={styles.promptOverlay}>
+          <View style={styles.promptCard}>
+            <Text style={styles.promptTitle}>Low balance</Text>
+            <Text style={styles.promptMessage}>
+              Balance is low in{' '}
+              <Text
+                style={[
+                  styles.promptAccountName,
+                  account.icon_color && {color: account.icon_color},
+                ]}>
+                {account.account_name}
+              </Text>
+              . Request {formatCurrency(pendingWithdrawAmount || 0)} from{' '}
+              <Text
+                style={[
+                  styles.promptAccountName,
+                  primaryEarningAccount?.icon_color && {
+                    color: primaryEarningAccount.icon_color,
+                  },
+                ]}>
+                {primaryEarningAccount?.account_name || 'primary account'}
+              </Text>
+              ?
+            </Text>
+            <TouchableOpacity
+              style={styles.promptRemember}
+              onPress={() =>
+                setRememberLowBalanceChoice(current => !current)
+              }>
+              <View
+                style={[
+                  styles.promptCheckbox,
+                  rememberLowBalanceChoice && styles.promptCheckboxChecked,
+                ]}>
+                {rememberLowBalanceChoice && (
+                  <Icon name="checkmark" size={14} color={colors.white} />
+                )}
+              </View>
+              <Text style={styles.promptRememberText}>
+                Remember my choice for this account
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.promptActions}>
+              <TouchableOpacity
+                style={[styles.promptButton, styles.promptButtonSecondary]}
+                onPress={handleLowBalancePromptNo}>
+                <Text style={styles.promptButtonTextSecondary}>No</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.promptButton, styles.promptButtonPrimary]}
+                onPress={handleLowBalancePromptYes}>
+                <Text style={styles.promptButtonTextPrimary}>Yes</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      )}
+      </Modal>
 
       {/* Bottom Fixed Section */}
       <View
@@ -1220,6 +1454,118 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
         </View>
       </Modal>
 
+      {menuVisible && (
+        <View style={styles.menuOverlay}>
+          <TouchableOpacity
+            style={styles.menuBackdrop}
+            activeOpacity={1}
+            onPress={() => setMenuVisible(false)}
+          />
+          <View style={styles.menu}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                openRenameModal();
+              }}>
+              <Text style={styles.menuItemText}>Rename Account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                Alert.alert(
+                  'Personalization',
+                  'Personalization options not yet implemented.'
+                );
+              }}>
+              <Text style={styles.menuItemText}>Personalization</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                Alert.alert(
+                  'Delete Account',
+                  'Are you sure you want to delete this account? This will remove all transactions.',
+                  [
+                    {text: 'Cancel', style: 'cancel'},
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await deleteTransactionsByAccount(account.id);
+                          await deleteAccount(account.id);
+                          navigation.goBack();
+                        } catch (error) {
+                          console.error('Failed to delete account:', error);
+                          Alert.alert(
+                            'Error',
+                            'Failed to delete account. Please try again.'
+                          );
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}>
+              <Text style={[styles.menuItemText, styles.menuItemDanger]}>
+                Delete Account
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <Modal
+        visible={renameModalVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeRenameModal}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={closeRenameModal}
+          />
+          <Animated.View
+            style={[
+              styles.modalSheet,
+              {
+                transform: [
+                  {
+                    translateY: modalSlideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [260, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Rename Account</Text>
+            <TextInput
+              style={styles.modalTextInput}
+              placeholder="Account name"
+              value={newAccountName}
+              onChangeText={setNewAccountName}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
+              onPress={handleSaveAccountName}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.modalAddButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
+
       <BottomSheet
         visible={isBottomSheetVisible}
         onClose={() => setBottomSheetVisible(false)}>
@@ -1260,6 +1606,45 @@ const styles = StyleSheet.create({
   },
   menuButton: {
     padding: 4,
+  },
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  menuBackdrop: {
+    flex: 1,
+  },
+  menu: {
+    position: 'absolute',
+    top: 54,
+    right: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: 180,
+    elevation: 6,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  menuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuItemText: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+  },
+  menuItemDanger: {
+    color: '#EF4444',
   },
   accountMetricsWrapper: {
     paddingTop: spacing.sm,
@@ -1669,6 +2054,16 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     marginBottom: spacing.md,
   },
+  modalTextInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+  },
   modalNoteLabel: {
     fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
@@ -1702,7 +2097,7 @@ const styles = StyleSheet.create({
     paddingLeft: 14,
   },
   amountInputBare: {
-    flex: 75,
+    flex: 55,
     fontSize: 22,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
@@ -1715,7 +2110,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   amountAccountButton: {
-    flex: 25,
+    flex: 45,
     paddingVertical: 12,
     paddingHorizontal: 12,
     flexDirection: 'row',
@@ -1792,34 +2187,84 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: fontWeight.semibold,
   },
-  toastContainer: {
-    position: 'absolute',
-    left: spacing.md,
-    right: spacing.md,
-    top: spacing.md,
+  promptOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
   },
-  toast: {
-    backgroundColor: 'rgba(220, 38, 38, 0.85)',
+  promptCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: spacing.md,
+  },
+  promptTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  promptMessage: {
+    fontSize: fontSize.medium,
+    color: colors.text.secondary,
+    marginBottom: spacing.md,
+  },
+  promptAccountName: {
+    fontWeight: fontWeight.semibold,
+  },
+  promptRemember: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  promptCheckbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+    backgroundColor: colors.white,
+  },
+  promptCheckboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  promptRememberText: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+  },
+  promptActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  promptButton: {
     paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     borderRadius: 8,
   },
-  toastText: {
-    color: colors.white,
-    fontSize: fontSize.small,
+  promptButtonSecondary: {
+    backgroundColor: '#F3F4F6',
+  },
+  promptButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  promptButtonTextSecondary: {
+    fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  promptButtonTextPrimary: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.white,
   },
 });
 
 export default LiabilityAccountDetailScreen;
-
-
-
-
-
-
-
-

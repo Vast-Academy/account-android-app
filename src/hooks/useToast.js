@@ -10,3 +10,7 @@ export const useToast = () => {
 
   return context;
 };
+
+export const useUniversalToast = () => {
+  return useToast();
+};

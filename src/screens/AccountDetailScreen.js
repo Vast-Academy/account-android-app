@@ -39,6 +39,7 @@ import {
 import {
   deleteAccount,
   getAllAccounts,
+  renameAccount,
   updateAccountPrimary,
 } from '../services/accountsDatabase';
 
@@ -150,6 +151,8 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [totalBalance, setTotalBalance] = useState(0);
   const [isPrimary, setIsPrimary] = useState(account.is_primary === 1);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
   const [editAmountVisible, setEditAmountVisible] = useState(false);
@@ -255,6 +258,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     } else {
       setWithdrawMode(null);
       setWithdrawAmount('');
+      setWithdrawNote('');
       setTransferSelectVisible(false);
     }
   }, [withdrawModalVisible, withdrawDefaultMode]);
@@ -294,7 +298,8 @@ const AccountDetailScreen = ({route, navigation}) => {
       addModalVisible ||
       withdrawModalVisible ||
       editAmountVisible ||
-      editRemarkVisible;
+      editRemarkVisible ||
+      renameModalVisible;
     if (isAnyModalOpen) {
       Animated.timing(modalSlideAnim, {
         toValue: 1,
@@ -312,6 +317,49 @@ const AccountDetailScreen = ({route, navigation}) => {
     editRemarkVisible,
     modalSlideAnim,
   ]);
+
+  const closeOptionsMenu = (keepSelection = false) => {
+    Animated.parallel([
+      Animated.timing(optionsOverlayOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(optionsContentTranslateY, {
+        toValue: 300,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setOptionsVisible(false);
+      if (!keepSelection) {
+        setSelectedTransaction(null);
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!optionsVisible) {
+      return;
+    }
+    optionsOverlayOpacity.setValue(0);
+    optionsContentTranslateY.setValue(300);
+    requestAnimationFrame(() => {
+      Animated.parallel([
+        Animated.timing(optionsOverlayOpacity, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.spring(optionsContentTranslateY, {
+          toValue: 0,
+          tension: 65,
+          friction: 10,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    });
+  }, [optionsVisible, optionsOverlayOpacity, optionsContentTranslateY]);
 
   const focusAddAmountInput = useCallback(() => {
     const focus = () => addAmountInputRef.current?.focus();
@@ -521,8 +569,45 @@ const AccountDetailScreen = ({route, navigation}) => {
     const remark = String(txn?.remark || '').trim().toLowerCase();
     return (
       remark.startsWith('transferred to ') ||
-      remark.startsWith('transferred from ')
+      remark.startsWith('transferred from ') ||
+      remark.startsWith('requested to ') ||
+      remark.startsWith('requested from ') ||
+      remark.startsWith('requested by ')
     );
+  };
+
+  const openRenameModal = () => {
+    setNewAccountName(account.account_name || '');
+    setRenameModalVisible(true);
+  };
+
+  const closeRenameModal = () => {
+    setRenameModalVisible(false);
+    setNewAccountName('');
+  };
+
+  const handleSaveAccountName = async () => {
+    if (!account?.id || !newAccountName.trim()) {
+      Alert.alert('Invalid Name', 'Account name cannot be empty.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await renameAccount(account.id, newAccountName.trim());
+      navigation.setParams({
+        account: {
+          ...account,
+          account_name: newAccountName.trim(),
+        },
+      });
+      showToast('Account renamed successfully', 'success');
+      closeRenameModal();
+    } catch (error) {
+      console.error('Failed to rename account:', error);
+      Alert.alert('Error', 'Failed to rename account.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const canEditRemark = txn => {
@@ -543,55 +628,13 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
     return amount < 0 && !isTransferTransaction(txn);
   };
+
   const canDeleteTransaction = txn => canEditAmount(txn);
 
-  const openTransactionMenu = (txn) => {
+  const openTransactionMenu = txn => {
     setSelectedTransaction(txn);
     setOptionsVisible(true);
   };
-
-  const closeOptionsMenu = (keepSelection = false) => {
-    Animated.parallel([
-      Animated.timing(optionsOverlayOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(optionsContentTranslateY, {
-        toValue: 300,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setOptionsVisible(false);
-      if (!keepSelection) {
-        setSelectedTransaction(null);
-      }
-    });
-  };
-
-  useEffect(() => {
-    if (!optionsVisible) {
-      return;
-    }
-    optionsOverlayOpacity.setValue(0);
-    optionsContentTranslateY.setValue(300);
-    requestAnimationFrame(() => {
-      Animated.parallel([
-        Animated.timing(optionsOverlayOpacity, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.spring(optionsContentTranslateY, {
-          toValue: 0,
-          tension: 65,
-          friction: 10,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
-  }, [optionsVisible, optionsOverlayOpacity, optionsContentTranslateY]);
 
   const handleUpdateAmount = async () => {
     if (!selectedTransaction) {
@@ -1032,10 +1075,10 @@ const AccountDetailScreen = ({route, navigation}) => {
                       <Text style={styles.chatTime}>
                         {formatTimeLabel(txn.transaction_date)}
                     </Text>
-                    <TouchableOpacity
-                      hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
-                      onPress={() => openTransactionMenu(txn)}
-                      style={styles.moreDots}>
+                      <TouchableOpacity
+                        style={styles.moreDots}
+                        hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                      onPress={() => openTransactionMenu(txn)}>
                       <Icon
                         name="ellipsis-vertical"
                         size={16}
@@ -1305,12 +1348,12 @@ const AccountDetailScreen = ({route, navigation}) => {
               value={amount}
               onChangeText={setAmount}
               keyboardType="numeric"
-              autoFocus
-              ref={addAmountInputRef}
-              showSoftInputOnFocus
-              editable={!loading}
-              onLayout={focusAddAmountInput}
-            />
+                autoFocus
+                ref={addAmountInputRef}
+                showSoftInputOnFocus
+                editable={!loading}
+                onLayout={focusAddAmountInput}
+              />
             <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
             <TextInput
               style={styles.modalNoteInput}
@@ -1470,7 +1513,6 @@ const AccountDetailScreen = ({route, navigation}) => {
                       ref={withdrawAmountInputRef}
                       showSoftInputOnFocus
                       editable={!loading}
-                      onLayout={focusWithdrawAmountInput}
                     />
                     <View style={styles.amountFieldDivider} />
                     <TouchableOpacity
@@ -1563,7 +1605,6 @@ const AccountDetailScreen = ({route, navigation}) => {
                   ref={withdrawAmountInputRef}
                   showSoftInputOnFocus
                   editable={!loading}
-                  onLayout={focusWithdrawAmountInput}
                 />
               )}
               <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
@@ -1810,7 +1851,7 @@ const AccountDetailScreen = ({route, navigation}) => {
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
-                Alert.alert('Rename Account', 'Rename flow coming soon');
+                openRenameModal();
               }}>
               <Text style={styles.menuItemText}>Rename Account</Text>
             </TouchableOpacity>
@@ -1818,9 +1859,12 @@ const AccountDetailScreen = ({route, navigation}) => {
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
-                Alert.alert('Add Schedule', 'Schedule flow coming soon');
+                Alert.alert(
+                  'Personalization',
+                  'Personalization options not yet implemented.'
+                );
               }}>
-              <Text style={styles.menuItemText}>Add Schedule</Text>
+              <Text style={styles.menuItemText}>Personalization</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
@@ -1878,6 +1922,54 @@ const AccountDetailScreen = ({route, navigation}) => {
           </View>
         </View>
       )}
+
+      <Modal
+        visible={renameModalVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeRenameModal}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={closeRenameModal}
+          />
+          <Animated.View
+            style={[
+              styles.modalSheet,
+              {
+                transform: [
+                  {
+                    translateY: modalSlideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [260, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Rename Account</Text>
+            <TextInput
+              style={styles.modalTextInput}
+              placeholder="Account name"
+              value={newAccountName}
+              onChangeText={setNewAccountName}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
+              onPress={handleSaveAccountName}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.modalAddButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -2205,6 +2297,30 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: '#166534',
   },
+  defaultToast: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    top: spacing.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 10,
+    elevation: 6,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  defaultToastText: {
+    color: colors.white,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    textAlign: 'center',
+  },
   modalAmountInput: {
     backgroundColor: colors.white,
     borderWidth: 1,
@@ -2213,6 +2329,16 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 22,
     fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+  },
+  modalTextInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: fontSize.medium,
     color: colors.text.primary,
     marginBottom: spacing.md,
   },
@@ -2232,7 +2358,7 @@ const styles = StyleSheet.create({
     paddingLeft: 14,
   },
   amountInputBare: {
-    flex: 75,
+    flex: 55,
     fontSize: 22,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
@@ -2245,7 +2371,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   amountAccountButton: {
-    flex: 25,
+    flex: 45,
     paddingVertical: 12,
     paddingHorizontal: 12,
     flexDirection: 'row',
@@ -2539,6 +2665,26 @@ const styles = StyleSheet.create({
     fontSize: fontSize.small,
     color: colors.text.secondary,
   },
+  toastContainer: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    top: spacing.md,
+    alignItems: 'center',
+  },
+  toast: {
+    backgroundColor: 'rgba(220, 38, 38, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  toastText: {
+    color: colors.white,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+  },
   moreDots: {
     paddingHorizontal: 4,
     paddingVertical: 2,
@@ -2690,5 +2836,3 @@ const styles = StyleSheet.create({
 });
 
 export default AccountDetailScreen;
-
-

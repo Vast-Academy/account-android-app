@@ -1,4 +1,5 @@
 import React, {createContext, useState, useCallback} from 'react';
+import {Platform, ToastAndroid} from 'react-native';
 
 export const ToastContext = createContext();
 
@@ -6,6 +7,18 @@ export const ToastProvider = ({children}) => {
   const [toasts, setToasts] = useState([]);
 
   const showToast = useCallback((message, type = 'success', duration = 2000) => {
+    if (Platform.OS === 'android') {
+      const toastDuration =
+        duration && duration <= 2000
+          ? ToastAndroid.SHORT
+          : ToastAndroid.LONG;
+      ToastAndroid.showWithGravity(
+        message,
+        toastDuration,
+        ToastAndroid.BOTTOM
+      );
+      return null;
+    }
     const id = Math.random().toString(36).substr(2, 9);
     const toast = {id, message, type, duration};
 
@@ -24,6 +37,7 @@ export const ToastProvider = ({children}) => {
 
   const value = {
     showToast,
+    showUniversalToast: showToast,
     dismissToast,
     toasts,
   };

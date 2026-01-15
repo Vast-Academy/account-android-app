@@ -11,6 +11,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const MONTH_START_DAY_KEY = 'monthStartDay';
 const MONTH_START_DAY_OPTIONS = Array.from({length: 28}, (_, index) => index + 1);
@@ -49,6 +50,7 @@ const SettingsScreen = ({navigation}) => {
     setMonthStartModalVisible(false);
     try {
       await AsyncStorage.setItem(MONTH_START_DAY_KEY, String(day));
+      queueBackupFromStorage();
     } catch (error) {
       console.error('Failed to save month start day:', error);
     }

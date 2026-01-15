@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,14 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from 'react-native';
+import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import { checkUsername, completeSetup } from '../services/api';
 import { saveUserData } from '../services/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {ensureDriveScopes, getStorageQuota} from '../services/driveService';
+import {isAutoBackupEnabled, setAutoBackupEnabled} from '../utils/backupQueue';
 
 const SetupScreen = ({ route, navigation }) => {
   const { firebaseUid, email, displayName, photoURL } = route.params;
@@ -25,6 +29,26 @@ const SetupScreen = ({ route, navigation }) => {
   const [checkingUsername, setCheckingUsername] = useState(false);
   const [usernameAvailable, setUsernameAvailable] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
+  const [backupAccountEmail, setBackupAccountEmail] = useState(email || '');
+  const [quotaText, setQuotaText] = useState('');
+  const [quotaLoading, setQuotaLoading] = useState(false);
+  const [autoBackupEnabled, setAutoBackupEnabledState] = useState(true);
+  const [selectingAccount, setSelectingAccount] = useState(false);
+
+  const formatBytes = value => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) {
+      return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = num;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+  };
 
   // Validate username format
   const validateUsernameFormat = (text) => {
@@ -61,6 +85,46 @@ const SetupScreen = ({ route, navigation }) => {
 
     return () => clearTimeout(timeoutId);
   }, [username]);
+
+  useEffect(() => {
+    const loadBackupSettings = async () => {
+      const enabled = await isAutoBackupEnabled();
+      setAutoBackupEnabledState(enabled);
+      const storedEmail = await AsyncStorage.getItem('backup.accountEmail');
+      if (storedEmail) {
+        setBackupAccountEmail(storedEmail);
+      } else if (email) {
+        setBackupAccountEmail(email);
+      }
+    };
+    loadBackupSettings();
+  }, [email]);
+
+  useEffect(() => {
+    const loadQuota = async () => {
+      if (!backupAccountEmail) {
+        setQuotaText('');
+        return;
+      }
+      setQuotaLoading(true);
+      try {
+        await ensureDriveScopes();
+        const quota = await getStorageQuota();
+        if (quota?.limit) {
+          const used = quota.usageInDrive || quota.usage || 0;
+          setQuotaText(`${formatBytes(used)} of ${formatBytes(quota.limit)}`);
+        } else {
+          setQuotaText('');
+        }
+      } catch (error) {
+        console.error('Failed to load Drive quota:', error);
+        setQuotaText('');
+      } finally {
+        setQuotaLoading(false);
+      }
+    };
+    loadQuota();
+  }, [backupAccountEmail]);
 
   // Handle setup completion
   const handleCompleteSetup = async () => {
@@ -106,11 +170,22 @@ const SetupScreen = ({ route, navigation }) => {
         // Save user data locally
         saveUserData(response.user);
         await AsyncStorage.setItem('user', JSON.stringify(response.user));
+        if (response.user?.firebaseUid) {
+          await AsyncStorage.setItem('firebaseUid', response.user.firebaseUid);
+        }
+        if (backupAccountEmail) {
+          await AsyncStorage.setItem('backup.accountEmail', backupAccountEmail);
+        }
+        await setAutoBackupEnabled(autoBackupEnabled);
 
         Alert.alert('Success', 'Account setup completed!', [
           {
             text: 'OK',
-            onPress: () => navigation.replace('Home', { user: response.user }),
+            onPress: () =>
+              navigation.replace('Home', {
+                user: response.user,
+                showTutorial: true,
+              }),
           },
         ]);
       }
@@ -125,6 +200,30 @@ const SetupScreen = ({ route, navigation }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSelectBackupAccount = async () => {
+    try {
+      setSelectingAccount(true);
+      await GoogleSignin.hasPlayServices();
+      await GoogleSignin.signOut();
+      const userInfo = await GoogleSignin.signIn();
+      const selectedEmail = userInfo?.data?.user?.email || userInfo?.user?.email;
+      if (selectedEmail) {
+        setBackupAccountEmail(selectedEmail);
+        await AsyncStorage.setItem('backup.accountEmail', selectedEmail);
+      }
+    } catch (error) {
+      console.error('Failed to select backup account:', error);
+      Alert.alert('Error', 'Unable to select Google account');
+    } finally {
+      setSelectingAccount(false);
+    }
+  };
+
+  const handleAutoBackupToggle = async value => {
+    setAutoBackupEnabledState(value);
+    await setAutoBackupEnabled(value);
   };
 
   // Handle suggestion press
@@ -161,13 +260,13 @@ const SetupScreen = ({ route, navigation }) => {
               )}
 
               {!checkingUsername && usernameAvailable === true && (
-                <Text style={styles.availableText}>✓ Available</Text>
+                <Text style={styles.availableText}>âœ“ Available</Text>
               )}
 
               {!checkingUsername &&
                 usernameAvailable === false &&
                 username.length >= 3 && (
-                  <Text style={styles.takenText}>✗ Already taken</Text>
+                  <Text style={styles.takenText}>âœ— Already taken</Text>
                 )}
 
               {!validateUsernameFormat(username) && username.length > 0 && (
@@ -218,14 +317,36 @@ const SetupScreen = ({ route, navigation }) => {
                 editable={!loading}
               />
             </View>
-
             {/* Google Account Info */}
             <View style={styles.googleInfo}>
-              <Text style={styles.googleInfoTitle}>Google Account:</Text>
-              <Text style={styles.googleInfoText}>{email} ✓</Text>
+              <Text style={styles.googleInfoTitle}>Backup Account</Text>
+              <View style={styles.googleRow}>
+                <Text style={styles.googleInfoText}>
+                  {backupAccountEmail || 'Not selected'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.googleChangeButton}
+                  onPress={handleSelectBackupAccount}
+                  disabled={selectingAccount || loading}>
+                  {selectingAccount ? (
+                    <ActivityIndicator size="small" />
+                  ) : (
+                    <Text style={styles.googleChangeText}>Change</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
               <Text style={styles.googleInfoSubtext}>
-                Your data will be backed up to Google Drive
+                {quotaLoading
+                  ? 'Loading storage...'
+                  : quotaText || 'Storage unavailable'}
               </Text>
+              <View style={styles.googleRow}>
+                <Text style={styles.googleInfoSubtext}>Auto backup</Text>
+                <Switch
+                  value={autoBackupEnabled}
+                  onValueChange={handleAutoBackupToggle}
+                />
+              </View>
             </View>
 
             {/* Complete Setup Button */}
@@ -353,6 +474,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 20,
   },
+  googleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   googleInfoTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -364,6 +490,16 @@ const styles = StyleSheet.create({
     color: '#28a745',
     fontWeight: '600',
     marginBottom: 5,
+    flex: 1,
+  },
+  googleChangeButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  googleChangeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#007AFF',
   },
   googleInfoSubtext: {
     fontSize: 12,
@@ -387,3 +523,4 @@ const styles = StyleSheet.create({
 });
 
 export default SetupScreen;
+

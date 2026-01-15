@@ -22,6 +22,7 @@ import Contacts from 'react-native-contacts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
+import {queueBackupFromStorage} from '../utils/backupQueue';
 import {
   initLedgerDatabase,
   getAllContactBalances,
@@ -142,7 +143,7 @@ const LedgerScreen = ({navigation}) => {
     setOverallBalance(stats);
     const latestDates = getLatestTransactionDateByContact();
     setLatestTransactionDates(latestDates);
-
+  
     // Fetch nicknames for current contacts to ensure display names are updated
     const contactsWithUpdatedNicknames = await Promise.all(
       baseContacts.map(async (contact) => {
@@ -150,7 +151,9 @@ const LedgerScreen = ({navigation}) => {
         return { ...contact, nickname: nickname || null };
       })
     );
-    setContacts(current => sortContactsByPinned(contactsWithUpdatedNicknames, pinnedContactIds, latestDates));
+    setContacts(current =>
+      sortContactsByPinned(contactsWithUpdatedNicknames, pinnedContactIds, latestDates)
+    );
   }, [contacts, pinnedContactIds]); // Add contacts to dependencies
 
 
@@ -174,6 +177,7 @@ const LedgerScreen = ({navigation}) => {
           CONTACTS_STORAGE_KEY,
           JSON.stringify(payload)
         );
+        queueBackupFromStorage();
       } catch (error) {
         console.error('Failed to store contacts:', error);
       }
@@ -188,6 +192,7 @@ const LedgerScreen = ({navigation}) => {
     const persistPinnedIds = async () => {
       try {
         await AsyncStorage.setItem(PINNED_CONTACT_IDS_STORAGE_KEY, JSON.stringify(pinnedContactIds));
+        queueBackupFromStorage();
       } catch (error) {
         console.error('Failed to save pinned contact IDs:', error);
       }
@@ -195,7 +200,9 @@ const LedgerScreen = ({navigation}) => {
     if (contactsHydrated) { // Only persist once contacts are loaded to avoid overwriting initial state
       persistPinnedIds();
       // Also resort contacts whenever pinnedContactIds change
-      setContacts(current => sortContactsByPinned(current, pinnedContactIds, latestTransactionDates));
+      setContacts(current =>
+        sortContactsByPinned(current, pinnedContactIds, latestTransactionDates)
+      );
     }
   }, [pinnedContactIds, contactsHydrated, latestTransactionDates]);
 
@@ -619,6 +626,7 @@ const LedgerScreen = ({navigation}) => {
     <View style={styles.container}>
       {/* Header + Totals */}
       <View style={styles.headerBlock}>
+        <View style={styles.headerRow} />
         <View style={styles.metricsRow}>
           <View style={styles.metricColumn}>
             <View style={styles.metricLabelRow}>
@@ -897,6 +905,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     elevation: 2,
   },
+  headerRow: {
+    height: 28,
+    marginBottom: spacing.sm,
+  },
   metricsRow: {
     flexDirection: 'row',
   },
@@ -928,7 +940,7 @@ const styles = StyleSheet.create({
   },
   listScrollView: {
     flex: 1,
-    padding: spacing.sm,
+    padding: spacing.md,
   },
   listContainer: {
     marginBottom: spacing.lg,
@@ -1239,6 +1251,29 @@ const styles = StyleSheet.create({
   modalContactDetails: {
     flex: 1,
     minWidth: 0,
+  },
+  contactRowDisabled: {
+    opacity: 0.6,
+  },
+  contactAddedText: {
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.secondary,
+  },
+  modalEmpty: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  modalEmptyText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    marginTop: spacing.sm,
+  },
+  modalEmptySubtext: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginTop: 4,
   },
 });
 

@@ -21,11 +21,11 @@ function App() {
   return (
     <SafeAreaProvider>
       <ToastProvider>
-        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top', 'bottom']}>
-          <AppNavigator />
-          <ToastContainer />
-        </SafeAreaView>
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top', 'bottom']}>
+        <AppNavigator />
+        <ToastContainer />
+      </SafeAreaView>
       </ToastProvider>
     </SafeAreaProvider>
   );
