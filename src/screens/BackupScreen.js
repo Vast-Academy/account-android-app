@@ -225,14 +225,14 @@ const BackupScreen = ({navigation}) => {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Google Account</Text>
-        <View style={styles.row}>
-          <Text style={styles.rowText}>{accountEmail || 'Not selected'}</Text>
-          <TouchableOpacity style={styles.linkButton} onPress={handleChangeAccount} disabled={busy}>
-            <Text style={styles.linkText}>Change</Text>
-          </TouchableOpacity>
+        <Text style={styles.sectionTitle}>Backup Account</Text>
+        <View style={styles.emailDisplay}>
+          <Text style={styles.emailText}>{accountEmail || 'Not selected'}</Text>
         </View>
         <Text style={styles.subText}>
+          Using your sign-in email for backup
+        </Text>
+        <Text style={styles.storageText}>
           {quotaLoading ? 'Loading storage...' : quotaText || 'Storage unavailable'}
         </Text>
       </View>
@@ -307,6 +307,24 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: fontSize.small,
     fontWeight: fontWeight.semibold,
+    color: colors.text.secondary,
+  },
+  emailDisplay: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  emailText: {
+    fontSize: fontSize.regular,
+    color: colors.text.primary,
+    fontWeight: fontWeight.medium,
+  },
+  storageText: {
+    marginTop: spacing.xs,
+    fontSize: fontSize.small,
     color: colors.text.secondary,
   },
   row: {

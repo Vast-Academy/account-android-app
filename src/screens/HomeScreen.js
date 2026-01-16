@@ -7,14 +7,18 @@ import {
   Alert,
   Image,
   ScrollView,
+  Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { auth } from '../config/firebase';
 import { clearLocalData } from '../services/database';
+import { useFocusEffect } from '@react-navigation/native';
 
 const HomeScreen = ({ route, navigation }) => {
   const [user, setUser] = useState(null);
+  const [showSetupPopup, setShowSetupPopup] = useState(false);
+  const [popupDismissedThisSession, setPopupDismissedThisSession] = useState(false);
 
   useEffect(() => {
     // Get user from params or AsyncStorage
@@ -33,6 +37,27 @@ const HomeScreen = ({ route, navigation }) => {
 
     loadUser();
   }, [navigation, route.params?.user]);
+
+  // Check setup completion status on screen focus
+  useFocusEffect(
+    React.useCallback(() => {
+      const checkSetupStatus = async () => {
+        try {
+          const storedUser = await AsyncStorage.getItem('user');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            if (!userData.setupComplete && !popupDismissedThisSession) {
+              setShowSetupPopup(true);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking setup status:', error);
+        }
+      };
+
+      checkSetupStatus();
+    }, [popupDismissedThisSession])
+  );
 
   const handleLogout = async () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -64,6 +89,16 @@ const HomeScreen = ({ route, navigation }) => {
     ]);
   };
 
+  const handleGoToProfile = () => {
+    setShowSetupPopup(false);
+    navigation.navigate('More');
+  };
+
+  const handleRemindLater = () => {
+    setShowSetupPopup(false);
+    setPopupDismissedThisSession(true);
+  };
+
   if (!user) {
     return (
       <View style={styles.loadingContainer}>
@@ -88,7 +123,6 @@ const HomeScreen = ({ route, navigation }) => {
 
           <View style={styles.userInfo}>
             <Text style={styles.displayName}>{user.displayName}</Text>
-            <Text style={styles.username}>@{user.username}</Text>
             <Text style={styles.email}>{user.email}</Text>
           </View>
         </View>
@@ -129,6 +163,34 @@ const HomeScreen = ({ route, navigation }) => {
           </Text>
         </View>
       </View>
+
+      {/* Setup Completion Popup */}
+      <Modal
+        visible={showSetupPopup}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleRemindLater}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Complete Your Profile Setup</Text>
+            <Text style={styles.modalDescription}>
+              Please complete your profile to unlock all features and ensure data backup.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleGoToProfile}>
+              <Text style={styles.primaryButtonText}>Go to Profile Settings</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleRemindLater}>
+              <Text style={styles.secondaryButtonText}>Remind Me Later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -180,11 +242,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
-  },
-  username: {
-    fontSize: 14,
-    color: '#e0e0e0',
-    marginTop: 2,
   },
   email: {
     fontSize: 12,
@@ -276,6 +333,63 @@ const styles = StyleSheet.create({
   backupSubtext: {
     fontSize: 12,
     color: '#666',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '85%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modalDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  primaryButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#333',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });
 

@@ -87,6 +87,7 @@ export const uploadAppDataFile = async ({
   const metadata = {
     name: fileName,
     mimeType,
+    parents: ['appDataFolder'],
   };
 
   const body =
@@ -100,13 +101,25 @@ export const uploadAppDataFile = async ({
     `--${boundary}--`;
 
   if (existingFileId) {
+    const updateMetadata = {
+      name: metadata.name,
+      mimeType: metadata.mimeType,
+    };
     const updateUrl = `${DRIVE_UPLOAD_URL}/${existingFileId}?uploadType=multipart`;
     const response = await driveFetch(updateUrl, {
       method: 'PATCH',
       headers: {
         'Content-Type': `multipart/related; boundary=${boundary}`,
       },
-      body,
+      body:
+        `--${boundary}\r\n` +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        `${JSON.stringify(updateMetadata)}\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Type: ${mimeType}\r\n` +
+        'Content-Transfer-Encoding: base64\r\n\r\n' +
+        `${fileBase64}\r\n` +
+        `--${boundary}--`,
     });
     return response.json();
   }

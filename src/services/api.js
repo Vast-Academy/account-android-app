@@ -146,4 +146,17 @@ export const logout = async (token) => {
   }
 };
 
+// 7. Update Profile
+export const updateProfile = async (firebaseUid, profileData) => {
+  try {
+    const response = await api.put('/auth/update-profile', {
+      firebaseUid,
+      ...profileData,
+    });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
 export default api;

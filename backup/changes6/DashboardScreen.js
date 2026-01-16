@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Modal,
   Platform,
@@ -18,6 +17,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import FaArrowCircleDown from '../components/icons/FaArrowCircleDown';
 import BsCashCoin from '../components/icons/BsCashCoin';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import AddAccountModal from '../components/AddAccountModal';
 import FaArrowCircleUp from '../components/icons/FaArrowCircleUp';
@@ -28,6 +28,7 @@ import {
   renameAccount,
   deleteAccountAndTransactions,
   updateAccountSortIndex,
+  updateAccountSortOrder,
 } from '../services/accountsDatabase';
 import {
   initTransactionsDatabase,
@@ -36,7 +37,6 @@ import {
 } from '../services/transactionsDatabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useToast} from '../hooks/useToast';
-import {useFocusEffect} from '@react-navigation/native';
 
 // Quick Period Options
 const QUICK_PERIODS = [
@@ -123,10 +123,6 @@ const DashboardScreen = ({route, navigation}) => {
   const [newAccountName, setNewAccountName] = useState('');
   const [fabLayout, setFabLayout] = useState(null);
   const {showToast} = useToast();
-
-   // Setup completion popup states
-   const [showSetupPopup, setShowSetupPopup] = useState(false);
-   const [popupDismissedThisSession, setPopupDismissedThisSession] = useState(false);
 
   const fabRef = useRef(null);
 
@@ -278,37 +274,6 @@ const DashboardScreen = ({route, navigation}) => {
   useEffect(() => {
     generateAvailableYears();
   }, [accounts]);
-
-  // Check setup completion status on screen focus
-  useFocusEffect(
-    React.useCallback(() => {
-      const checkSetupStatus = async () => {
-        try {
-          const storedUser = await AsyncStorage.getItem('user');
-          if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            if (!userData.setupComplete && !popupDismissedThisSession) {
-              setShowSetupPopup(true);
-            }
-          }
-        } catch (error) {
-          console.error('Error checking setup status:', error);
-        }
-      };
-
-      checkSetupStatus();
-    }, [popupDismissedThisSession])
-  );
-
-  const handleGoToProfile = () => {
-    setShowSetupPopup(false);
-    navigation.navigate('More');
-  };
-
-  const handleRemindLater = () => {
-    setShowSetupPopup(false);
-    setPopupDismissedThisSession(true);
-  };
 
   const normalizeMonthStartDay = value => {
     const parsed = Number(value);
@@ -798,14 +763,6 @@ const DashboardScreen = ({route, navigation}) => {
 
   const handleDeleteAccount = () => {
     if (!selectedAccount) return;
-    const balance = Number(selectedAccount?.balance) || 0;
-    if (Math.abs(balance) > 0.000001) {
-      Alert.alert(
-        'Balance Not Settled',
-        'This account balance is not settled. Please settle it to 0 before removing the account.'
-      );
-      return;
-    }
     Alert.alert(
       'Delete Account',
       `Are you sure you want to delete the account "${selectedAccount.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
@@ -856,6 +813,103 @@ const DashboardScreen = ({route, navigation}) => {
     } finally {
       closeRenameModal();
     }
+  };
+
+  const handleAccountReorder = async nextAccounts => {
+    setAccounts(nextAccounts);
+    try {
+      const orderedIds = nextAccounts.map(account => account.id);
+      await updateAccountSortOrder(orderedIds);
+    } catch (error) {
+      console.error('Failed to update account order:', error);
+      showToast('Failed to update account order', 'error');
+      loadAccounts();
+    }
+  };
+
+  const renderAccountItem = ({item, drag, isActive, index}) => {
+    const isFirst = index === 0;
+    const isLast = index === accounts.length - 1;
+    return (
+      <TouchableOpacity
+        style={[
+          styles.accountItem,
+          styles.accountItemSurface,
+          isFirst && styles.accountItemFirst,
+          isLast && styles.accountItemLast,
+          isActive && styles.accountItemActive,
+        ]}
+        onPress={() => {
+          if (item.account_type === 'earning') {
+            navigation.navigate('AccountDetail', {account: item});
+          } else {
+            navigation.navigate('LiabilityAccountDetail', {account: item});
+          }
+        }}
+        onLongPress={() => openContextMenu(item)}>
+        <View style={styles.badgeContainer}>
+          {item.is_primary === 1 && (
+            <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
+              <Icon name="star" size={12} color={colors.white} />
+            </View>
+          )}
+        </View>
+
+        <View style={styles.accountRow}>
+          <View
+            style={[
+              styles.accountIcon,
+              {
+                backgroundColor:
+                  item.icon_color ||
+                  (item.account_type === 'earning'
+                    ? colors.successLight
+                    : colors.warningLight),
+              },
+            ]}>
+            {renderAccountIcon(
+              item.icon || (item.account_type === 'earning' ? 'trending-up' : 'wallet'),
+              22,
+              item.icon_color ? colors.white : colors.text.primary
+            )}
+          </View>
+
+          <View style={styles.accountDetails}>
+            <View style={styles.accountHeader}>
+              <View style={styles.accountHeaderContent}>
+                <Text style={styles.accountName}>{item.account_name}</Text>
+              </View>
+            </View>
+            <Text style={styles.accountBalanceRow}>
+              <Text style={styles.accountBalanceLabel}>Balance </Text>
+              <Text
+                style={[
+                  styles.accountBalanceAmount,
+                  item.icon_color && {color: item.icon_color},
+                ]}>
+                {formatCurrency(item.balance || 0)}
+              </Text>
+            </Text>
+            <Text style={styles.accountDate}>
+              Created on{' '}
+              {new Date(item.created_at).toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.dragHandle}
+            onLongPress={drag}
+            delayLongPress={150}
+            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}>
+            <Text style={styles.dragHandleText}>=</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   return (
@@ -1005,104 +1059,31 @@ const DashboardScreen = ({route, navigation}) => {
           </View>
         </View>
       </View>
-      <ScrollView
+      <DraggableFlatList
         style={styles.scrollView}
+        contentContainerStyle={styles.accountsListContent}
+        data={accounts}
+        keyExtractor={item => String(item.id)}
+        renderItem={renderAccountItem}
+        onDragEnd={({data}) => handleAccountReorder(data)}
         showsVerticalScrollIndicator={false}
-        pointerEvents={showTutorialStep1 ? 'none' : 'auto'}>
-        {/* My Accounts */}
-        <View style={styles.accountsSection}>
-          <Text style={styles.sectionTitle}>My Accounts</Text>
-          {accounts.length > 0 ? (
-            <View style={styles.accountsList}>
-              {accounts.map(account => (
-                <TouchableOpacity
-                  key={account.id}
-                  style={styles.accountItem}
-                  onPress={() => {
-                    // Navigate to different screens based on account type
-                    if (account.account_type === 'earning') {
-                      navigation.navigate('AccountDetail', {account});
-                    } else {
-                      navigation.navigate('LiabilityAccountDetail', {account});
-                    }
-                  }}
-                  onLongPress={() => openContextMenu(account)}>
-                  <View style={styles.badgeContainer}>
-                    {account.is_primary === 1 && (
-                      <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
-                        <Icon name="star" size={12} color={colors.white} />
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.accountRow}>
-                    {/* Account Icon */}
-                      <View
-                      style={[
-                        styles.accountIcon,
-                        {
-                          backgroundColor:
-                            account.icon_color ||
-                            (account.account_type === 'earning'
-                              ? colors.successLight
-                              : colors.warningLight),
-                        },
-                      ]}>
-                      {renderAccountIcon(
-                        account.icon ||
-                          (account.account_type === 'earning'
-                            ? 'trending-up'
-                            : 'wallet'),
-                        22,
-                        account.icon_color ? colors.white : colors.text.primary
-                      )}
-                    </View>
-
-                    {/* Account Details */}
-                    <View style={styles.accountDetails}>
-                      <View style={styles.accountHeader}>
-                        <View style={styles.accountHeaderContent}>
-                          <Text style={styles.accountName}>
-                            {account.account_name}
-                          </Text>
-                        </View>
-                      </View>
-                        <Text style={styles.accountBalanceRow}>
-                          <Text style={styles.accountBalanceLabel}>
-                            Balance{' '}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.accountBalanceAmount,
-                              account.icon_color && {color: account.icon_color},
-                            ]}>
-                            {formatCurrency(account.balance || 0)}
-                          </Text>
-                        </Text>
-                      <Text style={styles.accountDate}>
-                        Created on{' '}
-                        {new Date(account.created_at).toLocaleDateString('en-IN', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
-                      </Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.emptyAccounts}>
-              <Icon name="wallet-outline" size={48} color={colors.border} />
-              <Text style={styles.emptyText}>No accounts yet</Text>
-              <Text style={styles.emptySubtext}>
-                Create your first account to get started
-              </Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
+        activationDistance={8}
+        pointerEvents={showTutorialStep1 ? 'none' : 'auto'}
+        ListHeaderComponent={
+          <View style={styles.accountsSection}>
+            <Text style={styles.sectionTitle}>My Accounts</Text>
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyAccounts}>
+            <Icon name="wallet-outline" size={48} color={colors.border} />
+            <Text style={styles.emptyText}>No accounts yet</Text>
+            <Text style={styles.emptySubtext}>
+              Create your first account to get started
+            </Text>
+          </View>
+        }
+      />
 
       {showTutorialStep1 && (
         <Modal visible transparent animationType="fade">
@@ -1289,34 +1270,6 @@ const DashboardScreen = ({route, navigation}) => {
         </View>
       </Modal>
 
-       {/* Setup Completion Popup */}
-       <Modal
-        visible={showSetupPopup}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={handleRemindLater}>
-        <View style={styles.setupModalOverlay}>
-          <View style={styles.setupModalContainer}>
-            <Text style={styles.setupModalTitle}>Complete Your Profile Setup</Text>
-            <Text style={styles.setupModalDescription}>
-              Please complete your profile to unlock all features and ensure data backup.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.setupPrimaryButton}
-              onPress={handleGoToProfile}>
-              <Text style={styles.setupPrimaryButtonText}>Go to Profile Settings</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.setupSecondaryButton}
-              onPress={handleRemindLater}>
-              <Text style={styles.setupSecondaryButtonText}>Remind Me Later</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
     </View>
   );
 };
@@ -1349,7 +1302,10 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  accountsListContent: {
     padding: spacing.sm,
+    paddingBottom: spacing.lg,
   },
   accountMetricsWrapper: {
     paddingTop: spacing.sm,
@@ -1526,6 +1482,24 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     alignItems: 'stretch',
   },
+  accountItemSurface: {
+    backgroundColor: colors.white,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.border,
+  },
+  accountItemFirst: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  accountItemLast: {
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+  accountItemActive: {
+    opacity: 0.9,
+  },
   earningWatermark: {
     position: 'absolute',
     right: 12,
@@ -1552,6 +1526,17 @@ const styles = StyleSheet.create({
   accountDetails: {
     flex: 1,
     minWidth: 0,
+  },
+  dragHandle: {
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  dragHandleText: {
+    fontSize: 22,
+    fontWeight: fontWeight.bold,
+    color: colors.text.secondary,
+    letterSpacing: 2,
   },
   accountHeader: {
     flexDirection: 'row',
@@ -1840,63 +1825,6 @@ const styles = StyleSheet.create({
   renameModalCancelButtonText: {
     color: colors.text.primary,
     fontWeight: 'bold',
-  },
-  setupModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  setupModalContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '85%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  setupModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  setupModalDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  setupPrimaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginBottom: 12,
-    alignItems: 'center',
-  },
-  setupPrimaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  setupSecondaryButton: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  setupSecondaryButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '500',
   },
 });
 

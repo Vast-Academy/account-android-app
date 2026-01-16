@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {performBackup} from '../services/backupService';
+import {ensureDriveScopes} from '../services/driveService';
 
 const BACKUP_ENABLED_KEY = 'backup.enabled';
 const DEFAULT_DEBOUNCE_MS = 90 * 1000;
@@ -28,6 +29,7 @@ const runBackup = async () => {
   const payload = queuedPayload;
   queuedPayload = null;
   try {
+    await ensureDriveScopes();
     await performBackup(payload);
   } catch (error) {
     console.error('Auto-backup failed:', error);

@@ -2,17 +2,14 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { auth } from '../config/firebase';
-import { googleSignIn, login } from '../services/api';
+import { googleSignIn } from '../services/api';
 import { saveUserData, initDatabase } from '../services/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveFirebaseToken } from '../utils/tokenManager';
@@ -21,54 +18,12 @@ import {findLatestBackupFile, restoreFromBackup} from '../services/backupService
 import RNRestart from 'react-native-restart';
 
 const LoginScreen = ({ navigation }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   // Initialize database on mount
   React.useEffect(() => {
     initDatabase();
   }, []);
-
-  // Username/Password Login
-  const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter username and password');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await login(username.toLowerCase(), password);
-
-      if (response.success) {
-        await AsyncStorage.setItem('backup.restorePending', 'true');
-        // Save user data locally
-        saveUserData(response.user);
-        await AsyncStorage.setItem('user', JSON.stringify(response.user));
-        if (response.user?.firebaseUid) {
-          await AsyncStorage.setItem('firebaseUid', response.user.firebaseUid);
-        }
-        if (response.user?.email) {
-          const existing = await AsyncStorage.getItem('backup.accountEmail');
-          if (!existing) {
-            await AsyncStorage.setItem('backup.accountEmail', response.user.email);
-          }
-        }
-
-        Alert.alert('Success', 'Login successful!');
-        const restored = await promptRestoreIfAvailable(response.user);
-        if (!restored) {
-          await AsyncStorage.setItem('backup.restorePending', 'false');
-          navigation.replace('Home', { user: response.user });
-        }
-      }
-    } catch (error) {
-      Alert.alert('Login Failed', error.message || 'Invalid username or password');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Google Sign-In
   const handleGoogleSignIn = async () => {
@@ -83,7 +38,6 @@ const LoginScreen = ({ navigation }) => {
       // Ensure chooser shows by clearing any cached Google session
       try {
         await GoogleSignin.signOut();
-        await GoogleSignin.revokeAccess();
       } catch (signOutError) {
         // Ignore sign-out errors and continue with sign-in
       }
@@ -137,36 +91,27 @@ const LoginScreen = ({ navigation }) => {
       console.log('Backend response:', response);
 
       if (response.success) {
-        if (response.setupComplete) {
-          await AsyncStorage.setItem('backup.restorePending', 'true');
-          // User already setup - go to Home
-          saveUserData(response.user);
-          await AsyncStorage.setItem('user', JSON.stringify(response.user));
-          if (response.user?.firebaseUid) {
-            await AsyncStorage.setItem('firebaseUid', response.user.firebaseUid);
-          }
-          if (response.user?.email) {
-            const existing = await AsyncStorage.getItem('backup.accountEmail');
-            if (!existing) {
-              await AsyncStorage.setItem(
-                'backup.accountEmail',
-                response.user.email,
-              );
-            }
-          }
-          const restored = await promptRestoreIfAvailable(response.user);
-          if (!restored) {
-            await AsyncStorage.setItem('backup.restorePending', 'false');
-            navigation.replace('Home', { user: response.user });
-          }
-        } else {
-          // New user - go to Setup
-          navigation.navigate('Setup', {
-            firebaseUid: response.user.firebaseUid,
-            email: response.user.email,
-            displayName: response.user.displayName,
-            photoURL: response.user.photoURL,
-          });
+        await AsyncStorage.setItem('backup.restorePending', 'true');
+
+        // Save user data locally
+        saveUserData(response.user);
+        await AsyncStorage.setItem('user', JSON.stringify(response.user));
+
+        if (response.user?.firebaseUid) {
+          await AsyncStorage.setItem('firebaseUid', response.user.firebaseUid);
+        }
+
+        // Auto-set backup email from Google Sign-In (cannot be changed)
+        if (response.user?.email) {
+          await AsyncStorage.setItem('backup.accountEmail', response.user.email);
+          await AsyncStorage.setItem('backup.enabled', 'true');
+        }
+
+        // Check for restore, then navigate to Home (Dashboard)
+        const restored = await promptRestoreIfAvailable(response.user);
+        if (!restored) {
+          await AsyncStorage.setItem('backup.restorePending', 'false');
+          navigation.replace('Home', { user: response.user });
         }
       }
     } catch (error) {
@@ -267,51 +212,13 @@ const LoginScreen = ({ navigation }) => {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}>
+    <View style={styles.container}>
       <View style={styles.innerContainer}>
         <Text style={styles.title}>Account App</Text>
-        <Text style={styles.subtitle}>Login to your account</Text>
+        <Text style={styles.subtitle}>Welcome Back!</Text>
+        <Text style={styles.description}>Sign in to continue</Text>
 
         <View style={styles.formContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="Username"
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            editable={!loading}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}>
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Login</Text>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
           <TouchableOpacity
             style={[styles.googleButton, loading && styles.buttonDisabled]}
             onPress={handleGoogleSignIn}
@@ -324,7 +231,7 @@ const LoginScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -346,6 +253,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   subtitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  description: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',

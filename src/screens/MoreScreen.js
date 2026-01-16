@@ -28,6 +28,7 @@ import {clearLocalData} from '../services/database';
 import {clearAllAccountsData} from '../services/accountsDatabase';
 import {clearAllLedgerData} from '../services/ledgerDatabase';
 import {queueBackupFromStorage} from '../utils/backupQueue';
+import {updateProfile} from '../services/api';
 
 const OCCUPATION_OPTIONS = [
   {label: 'Business Owner', value: 'Business Owner'},
@@ -377,6 +378,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       Alert.alert('Error', 'Please enter a name');
       return;
     }
+
+    // Validate mobile number if provided
+    if (draftPhoneNumber.trim() && !/^\d{10}$/.test(draftPhoneNumber.trim())) {
+      Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
+      return;
+    }
+
     setSaving(true);
     try {
       const occupationValue =
@@ -384,42 +392,53 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
           ? manualOccupation.trim()
           : occupationChoice;
       const normalizedPhoto = normalizeImageUri(draftPhoto || '');
-      if (onProfileUpdate) {
-        const result = await onProfileUpdate({
-          displayName: draftName.trim(),
-          photoURL: normalizedPhoto,
-          occupation: occupationValue || '',
-          dob: draftDob.trim(),
-          phoneNumber: draftPhoneNumber.trim(),
-          gender: draftGender,
-        });
-        if (result?.success === false) {
-          Alert.alert('Error', result.message || 'Failed to update profile');
-          return;
-        }
-      } else if (auth().currentUser) {
-        await auth().currentUser.updateProfile({
-          displayName: draftName.trim(),
-          photoURL: normalizedPhoto,
-        });
+
+      // Get firebaseUid
+      const firebaseUid = currentUser?.firebaseUid || await AsyncStorage.getItem('firebaseUid');
+
+      if (!firebaseUid) {
+        Alert.alert('Error', 'User authentication error. Please login again.');
+        return;
       }
 
-      const updatedUser = {
-        ...(currentUser || {}),
+      // Call backend API to update profile
+      const response = await updateProfile(firebaseUid, {
         displayName: draftName.trim(),
-        photoURL: normalizedPhoto,
-        dob: draftDob.trim(),
-        occupation: occupationValue || '',
-        phoneNumber: draftPhoneNumber.trim(),
-        gender: draftGender,
-      };
-      setCurrentUser(updatedUser);
-      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-      queueBackupFromStorage();
-      closeProfile();
+        mobile: draftPhoneNumber.trim() || null,
+        dob: draftDob.trim() || null,
+        gender: draftGender || null,
+        occupation: occupationValue || null,
+        setupComplete: true, // Mark setup as complete
+      });
+
+      if (response.success) {
+        // Update Firebase auth profile (photo is managed separately)
+        if (auth().currentUser) {
+          await auth().currentUser.updateProfile({
+            displayName: draftName.trim(),
+            photoURL: normalizedPhoto,
+          });
+        }
+
+        // Merge backend response with local photo URL
+        const updatedUser = {
+          ...response.user,
+          photoURL: normalizedPhoto,
+          phoneNumber: draftPhoneNumber.trim(),
+        };
+
+        setCurrentUser(updatedUser);
+        await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+        queueBackupFromStorage();
+
+        Alert.alert('Success', 'Profile updated successfully!');
+        closeProfile();
+      } else {
+        Alert.alert('Error', response.message || 'Failed to update profile');
+      }
     } catch (error) {
       console.error('Failed to update profile:', error);
-      Alert.alert('Error', 'Failed to update profile');
+      Alert.alert('Error', error.message || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
@@ -615,11 +634,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 {currentUser?.displayName || 'User'}
               </Text>
               <Text style={styles.profileEmail}>{currentUser?.email || ''}</Text>
-              {currentUser?.username && (
-                <Text style={styles.profileUsername}>
-                  @{currentUser.username}
-                </Text>
-              )}
             </View>
             <Icon
               name="chevron-forward"
@@ -695,13 +709,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 <Icon name="pencil" size={18} color={colors.white} />
               </TouchableOpacity>
             </View>
-
-            <Text style={styles.profileLabel}>Username</Text>
-            <TextInput
-              style={[styles.profileInput, styles.profileInputDisabled]}
-              value={currentUser?.username || ''}
-              editable={false}
-            />
 
             <Text style={styles.profileLabel}>Email</Text>
             <TextInput
@@ -946,11 +953,6 @@ const styles = StyleSheet.create({
   profileEmail: {
     fontSize: fontSize.medium,
     color: colors.text.secondary,
-  },
-  profileUsername: {
-    fontSize: fontSize.medium,
-    color: colors.primary,
-    marginTop: spacing.xs,
   },
   menuSection: {
     backgroundColor: colors.white,

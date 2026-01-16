@@ -143,8 +143,6 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
   const requestAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
-  const menuOverlayOpacity = useRef(new Animated.Value(0)).current;
-  const menuContentTranslateY = useRef(new Animated.Value(300)).current;
 
   const loadTransactions = useCallback(() => {
     if (!account.id) {
@@ -300,44 +298,6 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
     }, 250);
     return () => clearTimeout(timer);
   }, [requestModalVisible, focusRequestAmountInput]);
-
-  const openAccountMenu = () => {
-    setMenuVisible(true);
-    menuOverlayOpacity.setValue(0);
-    menuContentTranslateY.setValue(300);
-    requestAnimationFrame(() => {
-      Animated.parallel([
-        Animated.timing(menuOverlayOpacity, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.spring(menuContentTranslateY, {
-          toValue: 0,
-          tension: 65,
-          friction: 10,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
-  };
-
-  const closeAccountMenu = () => {
-    Animated.parallel([
-      Animated.timing(menuOverlayOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(menuContentTranslateY, {
-        toValue: 300,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setMenuVisible(false);
-    });
-  };
 
   const openRenameModal = () => {
     setNewAccountName(account.account_name || '');
@@ -1016,7 +976,11 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
             ]}>
             {account.account_name}
           </Text>
-        <TouchableOpacity onPress={openAccountMenu} style={styles.menuButton}>
+        <TouchableOpacity
+          onPress={() => {
+            setMenuVisible(true);
+          }}
+          style={styles.menuButton}>
           <Icon name="ellipsis-vertical" size={22} color={colors.text.primary} />
         </TouchableOpacity>
         </View>
@@ -1490,73 +1454,37 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
         </View>
       </Modal>
 
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="none"
-        onRequestClose={closeAccountMenu}>
-        <Animated.View
-          style={[
-            styles.optionsOverlay,
-            {opacity: menuOverlayOpacity},
-          ]}>
+      {menuVisible && (
+        <View style={styles.menuOverlay}>
           <TouchableOpacity
-            style={styles.optionsOverlayTouchable}
+            style={styles.menuBackdrop}
             activeOpacity={1}
-            onPress={closeAccountMenu}
+            onPress={() => setMenuVisible(false)}
           />
-          <Animated.View
-            style={[
-              styles.optionsContainer,
-              {transform: [{translateY: menuContentTranslateY}]},
-            ]}>
-            <View style={styles.optionsHeader}>
-              <Text style={styles.optionsTitle}>{account.account_name}</Text>
-            </View>
+          <View style={styles.menu}>
             <TouchableOpacity
-              style={styles.optionButton}
+              style={styles.menuItem}
               onPress={() => {
-                closeAccountMenu();
+                setMenuVisible(false);
                 openRenameModal();
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="create-outline"
-                  size={20}
-                  color={colors.text.primary}
-                />
-                <Text style={styles.optionText}>Rename Account</Text>
-              </View>
+              <Text style={styles.menuItemText}>Rename Account</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.optionButton}
+              style={styles.menuItem}
               onPress={() => {
-                closeAccountMenu();
+                setMenuVisible(false);
                 Alert.alert(
                   'Personalization',
                   'Personalization options not yet implemented.'
                 );
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="color-palette-outline"
-                  size={20}
-                  color={colors.text.primary}
-                />
-                <Text style={styles.optionText}>Personalization</Text>
-              </View>
+              <Text style={styles.menuItemText}>Personalization</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.optionButton, styles.optionDelete]}
+              style={styles.menuItem}
               onPress={() => {
-                closeAccountMenu();
-                if (Math.abs(Number(totalBalance) || 0) > 0.000001) {
-                  Alert.alert(
-                    'Balance Not Settled',
-                    'This account balance is not settled. Please settle it to 0 before removing the account.'
-                  );
-                  return;
-                }
+                setMenuVisible(false);
                 Alert.alert(
                   'Delete Account',
                   'Are you sure you want to delete this account? This will remove all transactions.',
@@ -1582,28 +1510,13 @@ const LiabilityAccountDetailScreen = ({route, navigation}) => {
                   ]
                 );
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon name="trash-outline" size={20} color="#B91C1C" />
-                <Text style={[styles.optionText, styles.optionDeleteText]}>
-                  Delete Account
-                </Text>
-              </View>
+              <Text style={[styles.menuItemText, styles.menuItemDanger]}>
+                Delete Account
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.optionButton, styles.optionButtonCancel]}
-              onPress={closeAccountMenu}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="close"
-                  size={20}
-                  color={colors.text.secondary}
-                />
-                <Text style={styles.optionTextCancel}>Cancel</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        </Animated.View>
-      </Modal>
+          </View>
+        </View>
+      )}
 
       <Modal
         visible={renameModalVisible}
@@ -1694,66 +1607,44 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 4,
   },
-  optionsOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
-  optionsOverlayTouchable: {
+  menuBackdrop: {
     flex: 1,
   },
-  optionsContainer: {
+  menu: {
+    position: 'absolute',
+    top: 54,
+    right: spacing.md,
     backgroundColor: colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: spacing.lg,
-    elevation: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: 180,
+    elevation: 6,
     shadowColor: colors.black,
-    shadowOffset: {width: 0, height: -4},
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
-  optionsHeader: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  optionsTitle: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: colors.text.primary,
-    textAlign: 'center',
-  },
-  optionButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  optionItemRow: {
+  menuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
   },
-  optionText: {
-    fontSize: fontSize.regular,
-    fontWeight: fontWeight.medium,
+  menuItemText: {
+    fontSize: fontSize.medium,
     color: colors.text.primary,
   },
-  optionDelete: {
-    backgroundColor: 'transparent',
-  },
-  optionDeleteText: {
-    color: '#B91C1C',
-  },
-  optionButtonCancel: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    marginTop: spacing.sm,
-  },
-  optionTextCancel: {
-    fontSize: fontSize.regular,
-    fontWeight: fontWeight.medium,
-    color: colors.text.secondary,
+  menuItemDanger: {
+    color: '#EF4444',
   },
   accountMetricsWrapper: {
     paddingTop: spacing.sm,

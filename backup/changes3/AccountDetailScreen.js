@@ -1908,14 +1908,7 @@ const AccountDetailScreen = ({route, navigation}) => {
                 closeAccountMenu();
                 openRenameModal();
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="create-outline"
-                  size={20}
-                  color={colors.text.primary}
-                />
-                <Text style={styles.optionText}>Rename Account</Text>
-              </View>
+              <Text style={styles.optionText}>Rename Account</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.optionButton}
@@ -1926,14 +1919,7 @@ const AccountDetailScreen = ({route, navigation}) => {
                   'Personalization options not yet implemented.'
                 );
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="color-palette-outline"
-                  size={20}
-                  color={colors.text.primary}
-                />
-                <Text style={styles.optionText}>Personalization</Text>
-              </View>
+              <Text style={styles.optionText}>Personalization</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.optionButton}
@@ -1945,20 +1931,13 @@ const AccountDetailScreen = ({route, navigation}) => {
               }}
               disabled={isPrimary}>
               <View style={styles.optionRow}>
-                <View style={styles.optionItemRow}>
-                  <Icon
-                    name="star-outline"
-                    size={20}
-                    color={isPrimary ? '#10B981' : colors.text.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      isPrimary && styles.optionTextSelected,
-                    ]}>
-                    {isPrimary ? 'Primary Account' : 'Set as Primary'}
-                  </Text>
-                </View>
+                <Text
+                  style={[
+                    styles.optionText,
+                    isPrimary && styles.optionTextSelected,
+                  ]}>
+                  {isPrimary ? 'Primary Account' : 'Set as Primary'}
+                </Text>
                 {isPrimary && (
                   <Icon name="checkmark" size={18} color="#10B981" />
                 )}
@@ -1968,13 +1947,6 @@ const AccountDetailScreen = ({route, navigation}) => {
               style={[styles.optionButton, styles.optionDelete]}
               onPress={() => {
                 closeAccountMenu();
-                if (Math.abs(Number(totalBalance) || 0) > 0.000001) {
-                  Alert.alert(
-                    'Balance Not Settled',
-                    'This account balance is not settled. Please settle it to 0 before removing the account.'
-                  );
-                  return;
-                }
                 Alert.alert(
                   'Delete Account',
                   'Are you sure you want to delete this account? This will remove all transactions.',
@@ -2000,24 +1972,14 @@ const AccountDetailScreen = ({route, navigation}) => {
                   ]
                 );
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon name="trash-outline" size={20} color="#B91C1C" />
-                <Text style={[styles.optionText, styles.optionDeleteText]}>
-                  Delete Account
-                </Text>
-              </View>
+              <Text style={[styles.optionText, styles.optionDeleteText]}>
+                Delete Account
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.optionButton, styles.optionButtonCancel]}
               onPress={closeAccountMenu}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="close"
-                  size={20}
-                  color={colors.text.secondary}
-                />
-                <Text style={styles.optionTextCancel}>Cancel</Text>
-              </View>
+              <Text style={styles.optionTextCancel}>Cancel</Text>
             </TouchableOpacity>
           </Animated.View>
         </Animated.View>
@@ -2569,11 +2531,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  optionItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
   },
   optionText: {
     fontSize: fontSize.regular,

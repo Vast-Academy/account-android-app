@@ -186,8 +186,6 @@ const AccountDetailScreen = ({route, navigation}) => {
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
-  const menuOverlayOpacity = useRef(new Animated.Value(0)).current;
-  const menuContentTranslateY = useRef(new Animated.Value(300)).current;
 
   const loadTransactions = useCallback(() => {
     if (!account.id) {
@@ -362,44 +360,6 @@ const AccountDetailScreen = ({route, navigation}) => {
       ]).start();
     });
   }, [optionsVisible, optionsOverlayOpacity, optionsContentTranslateY]);
-
-  const openAccountMenu = () => {
-    setMenuVisible(true);
-    menuOverlayOpacity.setValue(0);
-    menuContentTranslateY.setValue(300);
-    requestAnimationFrame(() => {
-      Animated.parallel([
-        Animated.timing(menuOverlayOpacity, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.spring(menuContentTranslateY, {
-          toValue: 0,
-          tension: 65,
-          friction: 10,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
-  };
-
-  const closeAccountMenu = () => {
-    Animated.parallel([
-      Animated.timing(menuOverlayOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(menuContentTranslateY, {
-        toValue: 300,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setMenuVisible(false);
-    });
-  };
 
   const focusAddAmountInput = useCallback(() => {
     const focus = () => addAmountInputRef.current?.focus();
@@ -1181,7 +1141,7 @@ const AccountDetailScreen = ({route, navigation}) => {
             {account.account_name}
           </Text>
           <TouchableOpacity
-            onPress={openAccountMenu}
+            onPress={() => setMenuVisible(true)}
             style={styles.menuButton}>
             <Icon name="ellipsis-vertical" size={22} color={colors.text.primary} />
           </TouchableOpacity>
@@ -1879,102 +1839,57 @@ const AccountDetailScreen = ({route, navigation}) => {
           </Animated.View>
         </View>
       </Modal>
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="none"
-        onRequestClose={closeAccountMenu}>
-        <Animated.View
-          style={[
-            styles.optionsOverlay,
-            {opacity: menuOverlayOpacity},
-          ]}>
+      {menuVisible && (
+        <View style={styles.menuOverlay}>
           <TouchableOpacity
-            style={styles.optionsOverlayTouchable}
+            style={styles.menuBackdrop}
             activeOpacity={1}
-            onPress={closeAccountMenu}
+            onPress={() => setMenuVisible(false)}
           />
-          <Animated.View
-            style={[
-              styles.optionsContainer,
-              {transform: [{translateY: menuContentTranslateY}]},
-            ]}>
-            <View style={styles.optionsHeader}>
-              <Text style={styles.optionsTitle}>{account.account_name}</Text>
-            </View>
+          <View style={styles.menu}>
             <TouchableOpacity
-              style={styles.optionButton}
+              style={styles.menuItem}
               onPress={() => {
-                closeAccountMenu();
+                setMenuVisible(false);
                 openRenameModal();
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="create-outline"
-                  size={20}
-                  color={colors.text.primary}
-                />
-                <Text style={styles.optionText}>Rename Account</Text>
-              </View>
+              <Text style={styles.menuItemText}>Rename Account</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.optionButton}
+              style={styles.menuItem}
               onPress={() => {
-                closeAccountMenu();
+                setMenuVisible(false);
                 Alert.alert(
                   'Personalization',
                   'Personalization options not yet implemented.'
                 );
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="color-palette-outline"
-                  size={20}
-                  color={colors.text.primary}
-                />
-                <Text style={styles.optionText}>Personalization</Text>
-              </View>
+              <Text style={styles.menuItemText}>Personalization</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.optionButton}
+              style={styles.menuItem}
               onPress={() => {
                 if (!isPrimary) {
                   handleTogglePrimary();
                 }
-                closeAccountMenu();
+                setMenuVisible(false);
               }}
               disabled={isPrimary}>
-              <View style={styles.optionRow}>
-                <View style={styles.optionItemRow}>
-                  <Icon
-                    name="star-outline"
-                    size={20}
-                    color={isPrimary ? '#10B981' : colors.text.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      isPrimary && styles.optionTextSelected,
-                    ]}>
-                    {isPrimary ? 'Primary Account' : 'Set as Primary'}
-                  </Text>
-                </View>
-                {isPrimary && (
-                  <Icon name="checkmark" size={18} color="#10B981" />
-                )}
-              </View>
+              <Text
+                style={[
+                  styles.menuItemText,
+                  isPrimary && styles.menuItemTextSelected,
+                ]}>
+                {isPrimary ? 'Primary Account' : 'Set as Primary'}
+              </Text>
+              {isPrimary && (
+                <Icon name="checkmark" size={18} color="#10B981" />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.optionButton, styles.optionDelete]}
+              style={styles.menuItem}
               onPress={() => {
-                closeAccountMenu();
-                if (Math.abs(Number(totalBalance) || 0) > 0.000001) {
-                  Alert.alert(
-                    'Balance Not Settled',
-                    'This account balance is not settled. Please settle it to 0 before removing the account.'
-                  );
-                  return;
-                }
+                setMenuVisible(false);
                 Alert.alert(
                   'Delete Account',
                   'Are you sure you want to delete this account? This will remove all transactions.',
@@ -2000,28 +1915,13 @@ const AccountDetailScreen = ({route, navigation}) => {
                   ]
                 );
               }}>
-              <View style={styles.optionItemRow}>
-                <Icon name="trash-outline" size={20} color="#B91C1C" />
-                <Text style={[styles.optionText, styles.optionDeleteText]}>
-                  Delete Account
-                </Text>
-              </View>
+              <Text style={[styles.menuItemText, styles.menuItemDanger]}>
+                Delete Account
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.optionButton, styles.optionButtonCancel]}
-              onPress={closeAccountMenu}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="close"
-                  size={20}
-                  color={colors.text.secondary}
-                />
-                <Text style={styles.optionTextCancel}>Cancel</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        </Animated.View>
-      </Modal>
+          </View>
+        </View>
+      )}
 
       <Modal
         visible={renameModalVisible}
@@ -2565,24 +2465,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
   },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  optionItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
   optionText: {
     fontSize: fontSize.regular,
     fontWeight: fontWeight.medium,
     color: colors.text.primary,
-  },
-  optionTextSelected: {
-    color: '#10B981',
-    fontWeight: fontWeight.semibold,
   },
   optionDelete: {
     backgroundColor: 'transparent',
@@ -2813,6 +2699,49 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: colors.text.secondary,
     marginTop: 12,
+  },
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  menuBackdrop: {
+    flex: 1,
+  },
+  menu: {
+    position: 'absolute',
+    top: 54,
+    right: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: 180,
+    elevation: 6,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  menuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuItemText: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+  },
+  menuItemTextSelected: {
+    color: '#10B981',
+    fontWeight: fontWeight.semibold,
+  },
+  menuItemDanger: {
+    color: '#EF4444',
   },
   bottomSection: {
     backgroundColor: colors.white,

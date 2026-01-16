@@ -36,7 +36,6 @@ import {
 } from '../services/transactionsDatabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useToast} from '../hooks/useToast';
-import {useFocusEffect} from '@react-navigation/native';
 
 // Quick Period Options
 const QUICK_PERIODS = [
@@ -123,10 +122,6 @@ const DashboardScreen = ({route, navigation}) => {
   const [newAccountName, setNewAccountName] = useState('');
   const [fabLayout, setFabLayout] = useState(null);
   const {showToast} = useToast();
-
-   // Setup completion popup states
-   const [showSetupPopup, setShowSetupPopup] = useState(false);
-   const [popupDismissedThisSession, setPopupDismissedThisSession] = useState(false);
 
   const fabRef = useRef(null);
 
@@ -278,37 +273,6 @@ const DashboardScreen = ({route, navigation}) => {
   useEffect(() => {
     generateAvailableYears();
   }, [accounts]);
-
-  // Check setup completion status on screen focus
-  useFocusEffect(
-    React.useCallback(() => {
-      const checkSetupStatus = async () => {
-        try {
-          const storedUser = await AsyncStorage.getItem('user');
-          if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            if (!userData.setupComplete && !popupDismissedThisSession) {
-              setShowSetupPopup(true);
-            }
-          }
-        } catch (error) {
-          console.error('Error checking setup status:', error);
-        }
-      };
-
-      checkSetupStatus();
-    }, [popupDismissedThisSession])
-  );
-
-  const handleGoToProfile = () => {
-    setShowSetupPopup(false);
-    navigation.navigate('More');
-  };
-
-  const handleRemindLater = () => {
-    setShowSetupPopup(false);
-    setPopupDismissedThisSession(true);
-  };
 
   const normalizeMonthStartDay = value => {
     const parsed = Number(value);
@@ -798,14 +762,6 @@ const DashboardScreen = ({route, navigation}) => {
 
   const handleDeleteAccount = () => {
     if (!selectedAccount) return;
-    const balance = Number(selectedAccount?.balance) || 0;
-    if (Math.abs(balance) > 0.000001) {
-      Alert.alert(
-        'Balance Not Settled',
-        'This account balance is not settled. Please settle it to 0 before removing the account.'
-      );
-      return;
-    }
     Alert.alert(
       'Delete Account',
       `Are you sure you want to delete the account "${selectedAccount.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
@@ -1285,34 +1241,6 @@ const DashboardScreen = ({route, navigation}) => {
                 <Text style={styles.renameModalButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
-
-       {/* Setup Completion Popup */}
-       <Modal
-        visible={showSetupPopup}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={handleRemindLater}>
-        <View style={styles.setupModalOverlay}>
-          <View style={styles.setupModalContainer}>
-            <Text style={styles.setupModalTitle}>Complete Your Profile Setup</Text>
-            <Text style={styles.setupModalDescription}>
-              Please complete your profile to unlock all features and ensure data backup.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.setupPrimaryButton}
-              onPress={handleGoToProfile}>
-              <Text style={styles.setupPrimaryButtonText}>Go to Profile Settings</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.setupSecondaryButton}
-              onPress={handleRemindLater}>
-              <Text style={styles.setupSecondaryButtonText}>Remind Me Later</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1840,63 +1768,6 @@ const styles = StyleSheet.create({
   renameModalCancelButtonText: {
     color: colors.text.primary,
     fontWeight: 'bold',
-  },
-  setupModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  setupModalContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '85%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  setupModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  setupModalDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  setupPrimaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginBottom: 12,
-    alignItems: 'center',
-  },
-  setupPrimaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  setupSecondaryButton: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  setupSecondaryButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '500',
   },
 });
 

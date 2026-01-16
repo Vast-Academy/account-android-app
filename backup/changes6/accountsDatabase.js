@@ -408,3 +408,31 @@ export const updateAccountSortIndex = async (id, sortIndex) => {
     throw error;
   }
 };
+
+export const updateAccountSortOrder = async orderedIds => {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return {success: true};
+  }
+  let db;
+  try {
+    db = getDB();
+    db.execute('BEGIN');
+    orderedIds.forEach((id, index) => {
+      db.execute('UPDATE accounts SET sort_index = ? WHERE id = ?', [
+        index,
+        id,
+      ]);
+    });
+    db.execute('COMMIT');
+    queueBackupFromStorage();
+    return {success: true};
+  } catch (error) {
+    try {
+      db?.execute('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Failed to rollback account sort order update:', rollbackError);
+    }
+    console.error('Failed to update account sort order:', error);
+    throw error;
+  }
+};

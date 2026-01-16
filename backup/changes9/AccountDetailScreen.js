@@ -1968,13 +1968,6 @@ const AccountDetailScreen = ({route, navigation}) => {
               style={[styles.optionButton, styles.optionDelete]}
               onPress={() => {
                 closeAccountMenu();
-                if (Math.abs(Number(totalBalance) || 0) > 0.000001) {
-                  Alert.alert(
-                    'Balance Not Settled',
-                    'This account balance is not settled. Please settle it to 0 before removing the account.'
-                  );
-                  return;
-                }
                 Alert.alert(
                   'Delete Account',
                   'Are you sure you want to delete this account? This will remove all transactions.',

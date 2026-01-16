@@ -41,7 +41,6 @@ export const initAccountsDatabase = () => {
         icon_color TEXT,
         balance REAL DEFAULT 0,
         is_primary INTEGER DEFAULT 0,
-        sort_index INTEGER,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -64,39 +63,12 @@ export const initAccountsDatabase = () => {
       // Column already exists, ignore
     }
     try {
-      db.execute('ALTER TABLE accounts ADD COLUMN sort_index INTEGER');
-    } catch (e) {
-      // Column already exists, ignore
-    }
-    try {
       db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
         BROWN_400,
         LEGACY_RED_400,
       ]);
     } catch (e) {
       // Ignore update errors (db may be locked/empty)
-    }
-    try {
-      const missingResult = db.execute(
-        'SELECT COUNT(*) as count FROM accounts WHERE sort_index IS NULL'
-      );
-      const missing = missingResult.rows?._array?.[0]?.count ?? 0;
-      if (missing > 0) {
-        const orderResult = db.execute(
-          'SELECT id FROM accounts ORDER BY updated_at DESC'
-        );
-        const rows = orderResult.rows?._array || [];
-        db.execute('BEGIN');
-        rows.forEach((row, index) => {
-          db.execute('UPDATE accounts SET sort_index = ? WHERE id = ?', [
-            index,
-            row.id,
-          ]);
-        });
-        db.execute('COMMIT');
-      }
-    } catch (e) {
-      console.warn('Failed to backfill sort_index:', e);
     }
 
     console.log('Accounts database initialized successfully');
@@ -111,24 +83,11 @@ export const createAccount = async (accountName, accountType, icon, iconColor) =
   try {
     const db = getDB();
     const timestamp = Date.now();
-    const minResult = db.execute(
-      'SELECT MIN(sort_index) as minIndex FROM accounts'
-    );
-    const minIndex = minResult.rows?._array?.[0]?.minIndex;
-    const sortIndex = Number.isFinite(minIndex) ? minIndex - 1 : 0;
 
     const result = db.execute(
-      `INSERT INTO accounts (account_name, account_type, icon, icon_color, balance, sort_index, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 0, ?, ?, ?)`,
-      [
-        accountName.trim(),
-        accountType,
-        icon || null,
-        iconColor || null,
-        sortIndex,
-        timestamp,
-        timestamp,
-      ]
+      `INSERT INTO accounts (account_name, account_type, icon, icon_color, balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+      [accountName.trim(), accountType, icon || null, iconColor || null, timestamp, timestamp]
     );
 
     try {
@@ -157,9 +116,7 @@ export const createAccount = async (accountName, accountType, icon, iconColor) =
 export const getAllAccounts = () => {
   try {
     const db = getDB();
-    const result = db.execute(
-      'SELECT * FROM accounts ORDER BY sort_index ASC, updated_at DESC'
-    );
+    const result = db.execute('SELECT * FROM accounts ORDER BY updated_at DESC');
     return (result.rows?._array || []).map(normalizeAccountColor);
   } catch (error) {
     console.error('Failed to get accounts:', error);
@@ -172,7 +129,7 @@ export const getAccountsByType = (type) => {
   try {
     const db = getDB();
     const result = db.execute(
-      'SELECT * FROM accounts WHERE account_type = ? ORDER BY sort_index ASC, updated_at DESC',
+      'SELECT * FROM accounts WHERE account_type = ? ORDER BY updated_at DESC',
       [type]
     );
     return (result.rows?._array || []).map(normalizeAccountColor);
@@ -390,21 +347,6 @@ export const updateAccountPrimary = async (accountId, isPrimary) => {
     return {success: true};
   } catch (error) {
     console.error('Failed to update primary status:', error);
-    throw error;
-  }
-};
-
-export const updateAccountSortIndex = async (id, sortIndex) => {
-  try {
-    const db = getDB();
-    db.execute('UPDATE accounts SET sort_index = ? WHERE id = ?', [
-      sortIndex,
-      id,
-    ]);
-    queueBackupFromStorage();
-    return {success: true};
-  } catch (error) {
-    console.error('Failed to update account sort index:', error);
     throw error;
   }
 };
