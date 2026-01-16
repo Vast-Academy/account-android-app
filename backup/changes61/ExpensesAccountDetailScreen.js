@@ -2639,7 +2639,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 10,
     minWidth: '70%',
-    overflow: 'hidden',
   },
   chatBubbleDebit: {
     backgroundColor: colors.white,
@@ -2700,11 +2699,11 @@ const styles = StyleSheet.create({
   },
   deletedWatermark: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '30%',
+    left: '-10%',
+    right: '-10%',
+    top: '45%',
     textAlign: 'center',
-    fontSize: 38,
+    fontSize: 44,
     fontWeight: fontWeight.bold,
     color: '#9CA3AF',
     opacity: 0.12,

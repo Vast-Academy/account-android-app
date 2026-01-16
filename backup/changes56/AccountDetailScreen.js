@@ -1,4 +1,4 @@
-﻿import React, {useCallback, useEffect, useRef, useState} from 'react';
+﻿import React, {useState, useEffect, useCallback, useRef} from 'react';
 import {
   View,
   Text,
@@ -10,32 +10,65 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  Dimensions,
   Animated,
   Easing,
   Keyboard,
   InteractionManager,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {Picker} from '@react-native-picker/picker';
+import Icon from 'react-native-vector-icons/Ionicons';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
+import {useToast} from '../hooks/useToast';
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 import BottomSheet from '../components/BottomSheet';
-import {useUniversalToast} from '../hooks/useToast';
 import {
   initTransactionsDatabase,
   createTransaction,
   deleteTransaction,
   getTransactionsByAccount,
   calculateAccountBalance,
-  deleteTransactionsByAccount,
   updateTransactionAmount,
   updateTransactionRemark,
+  deleteTransactionsByAccount,
 } from '../services/transactionsDatabase';
 import {
+  initRecurringDatabase,
+  createRecurringSchedule,
+} from '../services/recurringDatabase';
+import {
   deleteAccount,
-  getAccountsByType,
-  getPrimaryEarningAccount,
+  getAllAccounts,
   renameAccount,
+  updateAccountPrimary,
 } from '../services/accountsDatabase';
+
+const SCHEDULE_TYPES = [
+  {label: 'Once', value: 'once'},
+  {label: 'Weekly', value: 'weekly'},
+  {label: '2 Weeks', value: '2weeks'},
+  {label: 'Monthly', value: 'monthly'},
+  {label: '2 Months', value: '2months'},
+  {label: '3 Months', value: '3months'},
+  {label: '6 Months', value: '6months'},
+];
+
+const DAYS_OF_WEEK = [
+  {label: 'Monday', value: 'monday'},
+  {label: 'Tuesday', value: 'tuesday'},
+  {label: 'Wednesday', value: 'wednesday'},
+  {label: 'Thursday', value: 'thursday'},
+  {label: 'Friday', value: 'friday'},
+  {label: 'Saturday', value: 'saturday'},
+  {label: 'Sunday', value: 'sunday'},
+];
+
+const DATES_OF_MONTH = Array.from({length: 31}, (_, i) => ({
+  label: `${i + 1}`,
+  value: i + 1,
+}));
 
 const QUICK_PERIODS = [
   {label: 'Last 5 Days', value: '1week'},
@@ -69,32 +102,7 @@ const DEFAULT_MONTH_START_DAY = 1;
 const METRIC_ICON_SIZE = 28;
 const METRIC_LABEL_GAP = 6;
 const METRIC_LABEL_OFFSET = METRIC_ICON_SIZE + METRIC_LABEL_GAP;
-const LOW_BALANCE_PREF_KEY = 'expensesLowBalancePref';
-const LEGACY_LOW_BALANCE_PREF_KEY = String.fromCharCode(
-  108,
-  105,
-  97,
-  98,
-  105,
-  108,
-  105,
-  116,
-  121,
-  76,
-  111,
-  119,
-  66,
-  97,
-  108,
-  97,
-  110,
-  99,
-  101,
-  80,
-  114,
-  101,
-  102
-);
+const TRANSFER_LAST_ACCOUNT_KEY = 'transferLastAccountId';
 
 const withAlpha = (hex, alpha) => {
   if (!hex || typeof hex !== 'string') {
@@ -110,7 +118,7 @@ const withAlpha = (hex, alpha) => {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 };
 
-const tintWithWhite = (hex, whiteRatio = 0.94) => {
+const tintWithWhite = (hex, whiteRatio = 0.9) => {
   if (!hex || typeof hex !== 'string') {
     return hex;
   }
@@ -127,42 +135,45 @@ const tintWithWhite = (hex, whiteRatio = 0.94) => {
   return `#${toHex(mix(red))}${toHex(mix(green))}${toHex(mix(blue))}`;
 };
 
-const ExpensesAccountDetailScreen = ({route, navigation}) => {
+const AccountDetailScreen = ({route, navigation}) => {
   const account = route?.params?.account || {
     id: null,
     account_name: '',
     is_primary: 0,
   };
+  const {showToast} = useToast();
 
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawNote, setWithdrawNote] = useState('');
+  const [amount, setAmount] = useState('');
+  const [addNote, setAddNote] = useState('');
+  const [scheduleType, setScheduleType] = useState('once');
+  const [selectedDay, setSelectedDay] = useState('monday');
+  const [selectedDate, setSelectedDate] = useState(1);
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [totalBalance, setTotalBalance] = useState(0);
-  const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
-  const [requestModalVisible, setRequestModalVisible] = useState(false);
-  const [optionsVisible, setOptionsVisible] = useState(false);
-  const [selectedTransaction, setSelectedTransaction] = useState(null);
-  const [editAmountVisible, setEditAmountVisible] = useState(false);
-  const [editRemarkVisible, setEditRemarkVisible] = useState(false);
-  const [editAmount, setEditAmount] = useState('');
-  const [editRemark, setEditRemark] = useState('');
-  const [requestSelectVisible, setRequestSelectVisible] = useState(false);
-  const [requestAmount, setRequestAmount] = useState('');
-  const [requestNote, setRequestNote] = useState('');
-  const [requestAccounts, setRequestAccounts] = useState([]);
-  const [requestTarget, setRequestTarget] = useState(null);
-  const [requestFieldHeight, setRequestFieldHeight] = useState(0);
-  const [requestAccountWidth, setRequestAccountWidth] = useState(0);
+  const [isPrimary, setIsPrimary] = useState(account.is_primary === 1);
   const [menuVisible, setMenuVisible] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
-  const [lowBalancePromptVisible, setLowBalancePromptVisible] = useState(false);
-  const [rememberLowBalanceChoice, setRememberLowBalanceChoice] = useState(false);
-  const [lowBalancePreference, setLowBalancePreference] = useState(null);
-  const [pendingWithdrawAmount, setPendingWithdrawAmount] = useState(null);
-  const [pendingWithdrawTotal, setPendingWithdrawTotal] = useState(null);
-  const [primaryEarningAccount, setPrimaryEarningAccount] = useState(null);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
+  const [editAmountVisible, setEditAmountVisible] = useState(false);
+  const [editRemarkVisible, setEditRemarkVisible] = useState(false);
+  const [optionsVisible, setOptionsVisible] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editRemark, setEditRemark] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawNote, setWithdrawNote] = useState('');
+  const [withdrawMode, setWithdrawMode] = useState(null);
+  const [withdrawDefaultMode, setWithdrawDefaultMode] = useState(null);
+  const [hasDefaultPrompted, setHasDefaultPrompted] = useState(false);
+  const [transferSelectVisible, setTransferSelectVisible] = useState(false);
+  const [transferAccounts, setTransferAccounts] = useState([]);
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [transferAmount, setTransferAmount] = useState(0);
+  const [amountFieldHeight, setAmountFieldHeight] = useState(0);
+  const [amountAccountWidth, setAmountAccountWidth] = useState(0);
   const [quickPeriod, setQuickPeriod] = useState('1month');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
@@ -172,16 +183,81 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const [filteredAdded, setFilteredAdded] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
-  const {showUniversalToast} = useUniversalToast();
   const scrollViewRef = useRef(null);
-  const requestAmountInputRef = useRef(null);
+  const addAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
   const menuOverlayOpacity = useRef(new Animated.Value(0)).current;
   const menuContentTranslateY = useRef(new Animated.Value(300)).current;
+  const withdrawPulse = useRef(new Animated.Value(0)).current;
+  const transferPulse = useRef(new Animated.Value(0)).current;
+  const defaultPulse = useRef(new Animated.Value(0)).current;
+  const pulseAnimationRef = useRef(null);
 
+  const clearPulseAnimation = useCallback(() => {
+    if (pulseAnimationRef.current) {
+      pulseAnimationRef.current.stop();
+      pulseAnimationRef.current = null;
+    }
+    withdrawPulse.setValue(0);
+    transferPulse.setValue(0);
+    defaultPulse.setValue(0);
+  }, [withdrawPulse, transferPulse, defaultPulse]);
+
+  const runModeHighlightSequence = useCallback(() => {
+    const pulseOnce = target =>
+      Animated.sequence([
+        Animated.timing(target, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: false,
+        }),
+        Animated.timing(target, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: false,
+        }),
+      ]);
+
+    clearPulseAnimation();
+    const sequence = Animated.sequence([
+      pulseOnce(withdrawPulse),
+      pulseOnce(transferPulse),
+      pulseOnce(withdrawPulse),
+    ]);
+    pulseAnimationRef.current = sequence;
+    sequence.start(({finished}) => {
+      if (finished) {
+        pulseAnimationRef.current = null;
+      }
+    });
+  }, [clearPulseAnimation, withdrawPulse, transferPulse]);
+
+  const runDefaultHighlight = useCallback(() => {
+    const pulseUpMs = 300;
+    const pulseDownMs = 300;
+    const pulses = 5;
+    const steps = [];
+    for (let i = 0; i < pulses; i += 1) {
+      steps.push(
+        Animated.timing(defaultPulse, {
+          toValue: 1,
+          duration: pulseUpMs,
+          useNativeDriver: false,
+        })
+      );
+      steps.push(
+        Animated.timing(defaultPulse, {
+          toValue: 0,
+          duration: pulseDownMs,
+          useNativeDriver: false,
+        })
+      );
+    }
+    Animated.sequence(steps).start();
+  }, [defaultPulse]);
   const loadTransactions = useCallback(() => {
     if (!account.id) {
       setTransactions([]);
@@ -201,6 +277,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
   useEffect(() => {
     initTransactionsDatabase();
+    initRecurringDatabase();
     loadTransactions();
     loadMonthStartDay();
   }, [loadTransactions]);
@@ -231,50 +308,72 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   }, [transactions]);
 
   useEffect(() => {
-    if (!account?.id) {
-      setLowBalancePreference(null);
-      return;
-    }
-    let isActive = true;
-    const loadLowBalancePreference = async () => {
+    const loadWithdrawDefault = async () => {
       try {
-        const newKey = `${LOW_BALANCE_PREF_KEY}:${account.id}`;
-        const legacyKey = `${LEGACY_LOW_BALANCE_PREF_KEY}:${account.id}`;
-        let value = await AsyncStorage.getItem(newKey);
-
-        if (value !== 'auto' && value !== 'never') {
-          const legacyValue = await AsyncStorage.getItem(legacyKey);
-          if (legacyValue === 'auto' || legacyValue === 'never') {
-            await AsyncStorage.setItem(newKey, legacyValue);
-            await AsyncStorage.removeItem(legacyKey);
-            value = legacyValue;
-          } else {
-            value = null;
-          }
+        const stored = await AsyncStorage.getItem('withdrawDefaultMode');
+        if (stored === 'withdraw' || stored === 'transfer') {
+          setWithdrawDefaultMode(stored);
         }
-
-        if (!isActive) {
-          return;
-        }
-        setLowBalancePreference(value);
       } catch (error) {
-        console.error('Failed to load low balance preference:', error);
+        console.error('Failed to load withdraw default mode:', error);
       }
     };
-    loadLowBalancePreference();
-    return () => {
-      isActive = false;
-    };
-  }, [account?.id]);
+    loadWithdrawDefault();
+  }, []);
 
   useEffect(() => {
-    if (
+    if (withdrawModalVisible) {
+      if (withdrawDefaultMode) {
+        setWithdrawMode(withdrawDefaultMode);
+      }
+    } else {
+      setWithdrawMode(null);
+      setWithdrawAmount('');
+      setWithdrawNote('');
+      setTransferSelectVisible(false);
+      clearPulseAnimation();
+      setHasDefaultPrompted(false);
+    }
+  }, [withdrawModalVisible, withdrawDefaultMode, clearPulseAnimation]);
+
+  useEffect(() => {
+    if (!withdrawModalVisible || withdrawMode !== 'transfer') {
+      return;
+    }
+    const loadTransferAccounts = async () => {
+      try {
+        const accountsList = getAllAccounts().filter(
+          item => item.id !== account.id
+        );
+        setTransferAccounts(accountsList);
+        if (accountsList.length === 0) {
+          setTransferTarget(null);
+          return;
+        }
+        const storedId = await AsyncStorage.getItem(
+          TRANSFER_LAST_ACCOUNT_KEY
+        );
+        const selected =
+          accountsList.find(item => String(item.id) === storedId) ||
+          accountsList[0];
+        setTransferTarget(selected);
+      } catch (error) {
+        console.error('Failed to load transfer accounts:', error);
+        setTransferAccounts([]);
+        setTransferTarget(null);
+      }
+    };
+    loadTransferAccounts();
+  }, [withdrawModalVisible, withdrawMode, account.id]);
+
+  useEffect(() => {
+    const isAnyModalOpen =
+      addModalVisible ||
       withdrawModalVisible ||
-      requestModalVisible ||
-      renameModalVisible ||
       editAmountVisible ||
-      editRemarkVisible
-    ) {
+      editRemarkVisible ||
+      renameModalVisible;
+    if (isAnyModalOpen) {
       Animated.timing(modalSlideAnim, {
         toValue: 1,
         duration: 240,
@@ -285,77 +384,55 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       modalSlideAnim.setValue(0);
     }
   }, [
+    addModalVisible,
     withdrawModalVisible,
-    requestModalVisible,
-    renameModalVisible,
     editAmountVisible,
     editRemarkVisible,
     modalSlideAnim,
   ]);
 
-  useEffect(() => {
-    if (!requestModalVisible) {
-      setRequestSelectVisible(false);
-      return;
-    }
-    try {
-      const earningAccounts = getAccountsByType('earning');
-      setRequestAccounts(earningAccounts);
-      if (earningAccounts.length === 0) {
-        setRequestTarget(null);
-        return;
+  const closeOptionsMenu = (keepSelection = false) => {
+    Animated.parallel([
+      Animated.timing(optionsOverlayOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(optionsContentTranslateY, {
+        toValue: 300,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setOptionsVisible(false);
+      if (!keepSelection) {
+        setSelectedTransaction(null);
       }
-      setRequestTarget(current =>
-        current && earningAccounts.some(item => item.id === current.id)
-          ? current
-          : earningAccounts[0]
-      );
-    } catch (error) {
-      console.error('Failed to load earning accounts:', error);
-      setRequestAccounts([]);
-      setRequestTarget(null);
-    }
-  }, [requestModalVisible]);
-
-  const focusWithdrawAmountInput = useCallback(() => {
-    const focus = () => withdrawAmountInputRef.current?.focus();
-    Keyboard.dismiss();
-    focus();
-    requestAnimationFrame(focus);
-    InteractionManager.runAfterInteractions(focus);
-    setTimeout(focus, 300);
-    setTimeout(focus, 600);
-  }, []);
-
-  const focusRequestAmountInput = useCallback(() => {
-    const focus = () => requestAmountInputRef.current?.focus();
-    Keyboard.dismiss();
-    focus();
-    requestAnimationFrame(focus);
-    InteractionManager.runAfterInteractions(focus);
-    setTimeout(focus, 300);
-    setTimeout(focus, 600);
-  }, []);
+    });
+  };
 
   useEffect(() => {
-    if (!withdrawModalVisible) {
+    if (!optionsVisible) {
       return;
     }
-    const timer = setTimeout(() => {
-      focusWithdrawAmountInput();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [withdrawModalVisible, focusWithdrawAmountInput]);
-
-  useEffect(() => {
-    if (!requestModalVisible) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      focusRequestAmountInput();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [requestModalVisible, focusRequestAmountInput]);
+    optionsOverlayOpacity.setValue(0);
+    optionsContentTranslateY.setValue(300);
+    requestAnimationFrame(() => {
+      Animated.parallel([
+        Animated.timing(optionsOverlayOpacity, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.spring(optionsContentTranslateY, {
+          toValue: 0,
+          tension: 65,
+          friction: 10,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    });
+  }, [optionsVisible, optionsOverlayOpacity, optionsContentTranslateY]);
 
   const openAccountMenu = () => {
     setMenuVisible(true);
@@ -395,108 +472,257 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     });
   };
 
-  const openTransactionMenu = txn => {
-    setSelectedTransaction(txn);
-    setOptionsVisible(true);
-    optionsOverlayOpacity.setValue(0);
-    optionsContentTranslateY.setValue(300);
-    requestAnimationFrame(() => {
-      Animated.parallel([
-        Animated.timing(optionsOverlayOpacity, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.spring(optionsContentTranslateY, {
-          toValue: 0,
-          tension: 65,
-          friction: 10,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
+  const focusAddAmountInput = useCallback(() => {
+    const focus = () => addAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  const focusWithdrawAmountInput = useCallback(() => {
+    const focus = () => withdrawAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  useEffect(() => {
+    if (!addModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusAddAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [addModalVisible, focusAddAmountInput]);
+
+  useEffect(() => {
+    if (!withdrawModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusWithdrawAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [withdrawModalVisible, focusWithdrawAmountInput]);
+
+  const handleTogglePrimary = async () => {
+    try {
+      const newPrimaryStatus = !isPrimary;
+      await updateAccountPrimary(account.id, newPrimaryStatus);
+      setIsPrimary(newPrimaryStatus);
+      Alert.alert(
+        'Success',
+        newPrimaryStatus
+          ? 'This account is now set as your primary earning account'
+          : 'Primary status removed from this account'
+      );
+    } catch (error) {
+      console.error('Failed to update primary status:', error);
+      Alert.alert('Error', 'Failed to update primary status. Please try again.');
+    }
   };
 
-  const closeOptionsMenu = (keepSelection = false) => {
-    Animated.parallel([
-      Animated.timing(optionsOverlayOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(optionsContentTranslateY, {
-        toValue: 300,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setOptionsVisible(false);
-      if (!keepSelection) {
-        setSelectedTransaction(null);
+  const handleAddEntry = async () => {
+    // Validation
+    if (!amount || parseFloat(amount) <= 0) {
+      showToast('Please enter a valid amount.', 'error');
+      return false;
+    }
+
+    const remark = addNote.trim();
+
+    setLoading(true);
+    try {
+      const amountValue = parseFloat(amount);
+
+      if (scheduleType === 'once') {
+        // Create immediate transaction
+        await createTransaction(account.id, amountValue, remark);
+        showToast('Amount added successfully', 'success');
+      } else {
+        // Create recurring schedule
+        const needsDay = scheduleType === 'weekly' || scheduleType === '2weeks';
+        const needsDate = ['monthly', '2months', '3months', '6months'].includes(scheduleType);
+
+        await createRecurringSchedule(
+          account.id,
+          amountValue,
+          remark,
+          scheduleType,
+          needsDay ? selectedDay : null,
+          needsDate ? selectedDate : null
+        );
+
+        showToast(`Recurring ${scheduleType} schedule created.`, 'success');
       }
-    });
+
+      // Reset form
+      setAmount('');
+      setScheduleType('once');
+      setAddNote('');
+
+      // Reload transactions
+      loadTransactions();
+      return true;
+    } catch (error) {
+      console.error('Failed to add entry:', error);
+      Alert.alert('Error', 'Failed to add entry. Please try again.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+      showToast('Please enter a valid amount.', 'error');
+      return false;
+    }
+
+    const remark = withdrawNote.trim();
+
+    setLoading(true);
+    try {
+      const amountValue = Math.abs(parseFloat(withdrawAmount));
+      if (amountValue > totalBalance) {
+        showToast('Balance is low. Add amount first to withdraw.', 'error');
+        return false;
+      }
+      await createTransaction(account.id, -amountValue, remark);
+      showToast('Withdrawal recorded successfully', 'success');
+
+      setWithdrawAmount('');
+      setWithdrawNote('');
+      loadTransactions();
+      return true;
+    } catch (error) {
+      console.error('Failed to add withdrawal:', error);
+      Alert.alert('Error', 'Failed to add entry. Please try again.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTransfer = async targetAccount => {
+    if (!targetAccount) {
+      Alert.alert('Select Account', 'Please select a transfer account.');
+      return false;
+    }
+    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+      showToast('Please enter a valid amount.', 'error');
+      return false;
+    }
+
+    const amountValue = Math.abs(parseFloat(withdrawAmount));
+    if (amountValue > totalBalance) {
+      showToast('Balance is low. Add amount first to withdraw.', 'error');
+      return false;
+    }
+
+    await handleTransferToAccount(targetAccount, amountValue);
+    return true;
+  };
+
+  const handleTransferToAccount = async (targetAccount, amountValueOverride) => {
+    const amountValue = amountValueOverride ?? transferAmount;
+    if (!targetAccount || !amountValue) {
+      return;
+    }
+    const transferNote = withdrawNote.trim();
+    const toRemark = transferNote
+      ? `Transferred to ${targetAccount.account_name} - ${transferNote}`
+      : `Transferred to ${targetAccount.account_name}`;
+    const fromRemark = transferNote
+      ? `Transferred from ${account.account_name} - ${transferNote}`
+      : `Transferred from ${account.account_name}`;
+    setLoading(true);
+    try {
+      await createTransaction(
+        account.id,
+        -amountValue,
+        toRemark
+      );
+      await createTransaction(
+        targetAccount.id,
+        amountValue,
+        fromRemark
+      );
+      setWithdrawAmount('');
+      setWithdrawNote('');
+      setTransferAmount(0);
+      setTransferSelectVisible(false);
+      setTransferTarget(targetAccount);
+      AsyncStorage.setItem(
+        TRANSFER_LAST_ACCOUNT_KEY,
+        String(targetAccount.id)
+      ).catch(error => {
+        console.error('Failed to save transfer account:', error);
+      });
+      loadTransactions();
+      showToast('Transfer completed successfully', 'success');
+    } catch (error) {
+      console.error('Failed to transfer:', error);
+      Alert.alert('Error', 'Failed to transfer. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const isTransferTransaction = txn => {
     const remark = String(txn?.remark || '').trim().toLowerCase();
     return (
       remark.startsWith('transferred to ') ||
-      remark.startsWith('transferred from ')
-    );
-  };
-
-  const isRequestTransaction = txn => {
-    const remark = String(txn?.remark || '').trim().toLowerCase();
-    return (
+      remark.startsWith('transferred from ') ||
+      remark.startsWith('requested to ') ||
       remark.startsWith('requested from ') ||
-      remark.startsWith('requested by ') ||
-      remark.startsWith('requested to ')
+      remark.startsWith('requested by ')
     );
   };
 
-  const isLockedTransaction = txn =>
-    isTransferTransaction(txn) || isRequestTransaction(txn);
+  const openRenameModal = () => {
+    setNewAccountName(account.account_name || '');
+    setRenameModalVisible(true);
+  };
 
-  const getLinkedEarningTransaction = txn => {
-    if (!txn) {
-      return null;
+  const closeRenameModal = () => {
+    setRenameModalVisible(false);
+    setNewAccountName('');
+  };
+
+  const handleSaveAccountName = async () => {
+    if (!account?.id || !newAccountName.trim()) {
+      Alert.alert('Invalid Name', 'Account name cannot be empty.');
+      return;
     }
-    const remark = String(txn.remark || '').trim();
-    if (!remark) {
-      return null;
-    }
-    if (!isLockedTransaction(txn)) {
-      return null;
-    }
-    const amountValue = Math.abs(Number(txn.amount) || 0);
-    if (!amountValue) {
-      return null;
-    }
-    const earningAccounts = getAccountsByType('earning');
-    let bestMatch = null;
-    let bestDelta = Number.POSITIVE_INFINITY;
-    earningAccounts.forEach(earning => {
-      const earningTxns = getTransactionsByAccount(earning.id);
-      earningTxns.forEach(entry => {
-        const entryAmount = Math.abs(Number(entry.amount) || 0);
-        if (entryAmount !== amountValue) {
-          return;
-        }
-        const delta = Math.abs(Number(entry.transaction_date) - Number(txn.transaction_date));
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestMatch = entry;
-        }
+    setLoading(true);
+    try {
+      await renameAccount(account.id, newAccountName.trim());
+      navigation.setParams({
+        account: {
+          ...account,
+          account_name: newAccountName.trim(),
+        },
       });
-    });
-    return bestMatch;
+      showToast('Account renamed successfully', 'success');
+      closeRenameModal();
+    } catch (error) {
+      console.error('Failed to rename account:', error);
+      Alert.alert('Error', 'Failed to rename account.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const canEditRemark = txn => {
     if (!txn) {
-      return false;
-    }
-    if (Number(txn.is_deleted) === 1) {
       return false;
     }
     const amount = Number(txn.amount);
@@ -537,23 +763,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (!transactions || transactions.length === 0) {
       return null;
     }
-    let latest = null;
-    for (let i = 0; i < transactions.length; i += 1) {
-      const txn = transactions[i];
-      if (Number(txn.is_deleted) === 1) {
-        continue;
-      }
-      if (!latest) {
-        latest = txn;
-        continue;
-      }
-      const currentDate = Number(txn.transaction_date) || 0;
-      const latestDate = Number(latest.transaction_date) || 0;
-      if (
-        currentDate > latestDate ||
-        (currentDate === latestDate && Number(txn.id) > Number(latest.id))
-      ) {
-        latest = txn;
+    let latest = transactions[0];
+    for (let i = 1; i < transactions.length; i += 1) {
+      if (transactions[i].transaction_date > latest.transaction_date) {
+        latest = transactions[i];
       }
     }
     return latest?.id ?? null;
@@ -570,7 +783,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (!latestId || txn.id !== latestId) {
       return false;
     }
-    if (isLockedTransaction(txn)) {
+    if (isTransferTransaction(txn)) {
       return false;
     }
     const editCount = Number(txn.edit_count) || 0;
@@ -592,8 +805,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (!latestId || txn.id !== latestId) {
       return false;
     }
+    if (isTransferTransaction(txn)) {
+      return false;
+    }
     const amount = Number(txn.amount);
     return Number.isFinite(amount);
+  };
+
+  const openTransactionMenu = txn => {
+    setSelectedTransaction(txn);
+    setOptionsVisible(true);
   };
 
   const handleUpdateAmount = async () => {
@@ -604,19 +825,19 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       String(editAmount).replace(/[^0-9.]/g, '')
     );
     if (!parsedAmount || parsedAmount <= 0) {
-      showUniversalToast('Please enter a valid amount.', 'error');
+      showToast('Please enter a valid amount.', 'error');
       return;
     }
     const editCount = Number(selectedTransaction.edit_count) || 0;
     if (editCount >= 3) {
-      showUniversalToast('Edit limit reached.', 'error');
+      showToast('Edit limit reached.', 'error');
       return;
     }
     if (Number(selectedTransaction.amount) < 0) {
       const currentAbs = Math.abs(Number(selectedTransaction.amount) || 0);
       const availableBalance = totalBalance + currentAbs;
       if (parsedAmount > availableBalance) {
-        showUniversalToast('Balance is low. Add amount first to withdraw.', 'error');
+        showToast('Balance is low. Add amount first to withdraw.', 'error');
         return;
       }
     }
@@ -639,7 +860,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         editCount + 1
       );
       const remainingEdits = Math.max(0, 2 - editCount);
-      showUniversalToast(`${remainingEdits} edits remaining.`, 'success');
+      showToast(`${remainingEdits} edits remaining.`, 'success');
       setEditAmountVisible(false);
       setSelectedTransaction(null);
       setEditAmount('');
@@ -671,271 +892,19 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }
   };
 
-  const openRenameModal = () => {
-    setNewAccountName(account.account_name || '');
-    setRenameModalVisible(true);
-  };
-
-  const closeRenameModal = () => {
-    setRenameModalVisible(false);
-    setNewAccountName('');
-  };
-
-  const handleSaveAccountName = async () => {
-    if (!account?.id || !newAccountName.trim()) {
-      Alert.alert('Invalid Name', 'Account name cannot be empty.');
-      return;
-    }
-    setLoading(true);
-    try {
-      await renameAccount(account.id, newAccountName.trim());
-      navigation.setParams({
-        account: {
-          ...account,
-          account_name: newAccountName.trim(),
-        },
-      });
-      showUniversalToast('Account renamed successfully', 'success');
-      closeRenameModal();
-    } catch (error) {
-      console.error('Failed to rename account:', error);
-      Alert.alert('Error', 'Failed to rename account.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const requestFromPrimaryEarning = async (
-    amountValue,
-    note,
-    {finalizeWithdrawal = false, withdrawalAmount = null} = {}
-  ) => {
-    const primary = getPrimaryEarningAccount();
-    if (!primary) {
-      Alert.alert(
-        'No Primary Account',
-        'Please set a primary earning account first.'
-      );
-      return false;
-    }
-    setPrimaryEarningAccount(primary);
-    setLoading(true);
-    try {
-      const earningBalance = calculateAccountBalance(primary.id);
-      if (earningBalance < amountValue) {
-        showUniversalToast(
-          `Low balance on ${primary.account_name}.`,
-          'error'
-        );
-        return false;
-      }
-      const trimmedNote = String(note || '').trim();
-      const fromRemark = trimmedNote
-        ? `Requested by ${account.account_name} - ${trimmedNote}`
-        : `Requested by ${account.account_name}`;
-      const toRemark = trimmedNote
-        ? `Requested from ${primary.account_name} - ${trimmedNote}`
-        : `Requested from ${primary.account_name}`;
-      await createTransaction(primary.id, -amountValue, fromRemark);
-      await createTransaction(account.id, amountValue, toRemark);
-      if (finalizeWithdrawal) {
-        const withdrawalRemark = String(note || '').trim();
-        const finalAmount =
-          withdrawalAmount !== null ? withdrawalAmount : amountValue;
-        await createTransaction(account.id, -finalAmount, withdrawalRemark);
-      }
-      setWithdrawAmount('');
-      setWithdrawNote('');
-      loadTransactions();
-      showUniversalToast(
-        `Amount requested from ${primary.account_name}.`,
-        'success'
-      );
-      return true;
-    } catch (error) {
-      console.error('Failed to request amount:', error);
-      Alert.alert('Error', 'Failed to request amount. Please try again.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const saveLowBalancePreference = async value => {
-    if (!account?.id) {
-      return;
-    }
-    try {
-      await AsyncStorage.setItem(
-        `${LOW_BALANCE_PREF_KEY}:${account.id}`,
-        value
-      );
-      setLowBalancePreference(value);
-    } catch (error) {
-      console.error('Failed to save low balance preference:', error);
-    }
-  };
-
-  const closeLowBalancePrompt = () => {
-    setLowBalancePromptVisible(false);
-    setPendingWithdrawAmount(null);
-    setPendingWithdrawTotal(null);
-  };
-
-  const handleLowBalancePromptYes = async () => {
-    if (!pendingWithdrawAmount) {
-      closeLowBalancePrompt();
-      return;
-    }
-    if (rememberLowBalanceChoice) {
-      await saveLowBalancePreference('auto');
-    }
-    const success = await requestFromPrimaryEarning(
-      pendingWithdrawAmount,
-      withdrawNote,
-      {
-        finalizeWithdrawal: true,
-        withdrawalAmount:
-          pendingWithdrawTotal !== null
-            ? pendingWithdrawTotal
-            : pendingWithdrawAmount,
-      }
-    );
-    closeLowBalancePrompt();
-    if (success) {
-      setWithdrawModalVisible(false);
-    }
-  };
-
-  const handleLowBalancePromptNo = async () => {
-    if (rememberLowBalanceChoice) {
-      await saveLowBalancePreference('never');
-    }
-    closeLowBalancePrompt();
-    showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
-  };
-
-  const handleWithdraw = async () => {
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-      showUniversalToast('Please enter a valid amount.', 'error');
-      return false;
-    }
-
-    const amountValue = Math.abs(parseFloat(withdrawAmount));
-    if (amountValue > totalBalance) {
-      const shortfall = Math.max(0, amountValue - totalBalance);
-      if (lowBalancePreference === 'never') {
-        showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
-        return false;
-      }
-      if (lowBalancePreference === 'auto') {
-        const success = await requestFromPrimaryEarning(
-          shortfall,
-          withdrawNote,
-          {finalizeWithdrawal: true, withdrawalAmount: amountValue}
-        );
-        if (success) {
-          setWithdrawModalVisible(false);
-        }
-        return success;
-      }
-      const primary = getPrimaryEarningAccount();
-      if (!primary) {
-        Alert.alert(
-          'No Primary Account',
-          'Please set a primary earning account first.'
-        );
-        return false;
-      }
-      setPrimaryEarningAccount(primary);
-      setPendingWithdrawAmount(shortfall);
-      setPendingWithdrawTotal(amountValue);
-      setRememberLowBalanceChoice(false);
-      setLowBalancePromptVisible(true);
-      return false;
-    }
-
-    setLoading(true);
-    try {
-      const remark = withdrawNote.trim();
-      await createTransaction(account.id, -amountValue, remark);
-      showUniversalToast('Withdrawal recorded.', 'success');
-      setWithdrawAmount('');
-      setWithdrawNote('');
-      loadTransactions();
-      return true;
-    } catch (error) {
-      console.error('Failed to add withdrawal:', error);
-      Alert.alert('Error', 'Failed to add entry. Please try again.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRequestStart = async () => {
-    if (!requestAmount || parseFloat(requestAmount) <= 0) {
-      showUniversalToast('Please enter a valid amount.', 'error');
-      return false;
-    }
-
-    const amountValue = Math.abs(parseFloat(requestAmount));
-    if (!requestAccounts || requestAccounts.length === 0) {
-      Alert.alert('No Accounts', 'No earning accounts available for request.');
-      return false;
-    }
-
-    if (!requestTarget) {
-      Alert.alert('Select Account', 'Please select an earning account.');
-      return false;
-    }
-
-    await handleRequestFromAccount(requestTarget, amountValue);
-    return true;
-  };
-
-  const handleRequestFromAccount = async (earningAccount, amountValue) => {
-    if (!earningAccount || !amountValue) {
-      return;
-    }
-    setLoading(true);
-    try {
-      const earningBalance = calculateAccountBalance(earningAccount.id);
-      if (earningBalance < amountValue) {
-        showUniversalToast(
-          `Low balance on ${earningAccount.account_name}.`,
-          'error'
-        );
-        return;
-      }
-
-      const trimmedNote = requestNote.trim();
-      const fromRemark = trimmedNote
-        ? `Requested by ${account.account_name} - ${trimmedNote}`
-        : `Requested by ${account.account_name}`;
-      const toRemark = trimmedNote
-        ? `Requested from ${earningAccount.account_name} - ${trimmedNote}`
-        : `Requested from ${earningAccount.account_name}`;
-      await createTransaction(earningAccount.id, -amountValue, fromRemark);
-      await createTransaction(account.id, amountValue, toRemark);
-      setRequestAmount('');
-      setRequestNote('');
-      setRequestSelectVisible(false);
-      loadTransactions();
-      showUniversalToast(
-        `Amount requested from ${earningAccount.account_name}.`,
-        'success'
-      );
-    } catch (error) {
-      console.error('Failed to request amount:', error);
-      Alert.alert('Error', 'Failed to request amount. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const formatCurrency = value => {
     return `\u20B9 ${value.toLocaleString('en-IN')}`;
+  };
+
+  const formatDateTime = timestamp => {
+    const date = new Date(timestamp);
+    return date.toLocaleString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
   };
 
   const formatDateLabel = timestamp => {
@@ -1279,11 +1248,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
           const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
           const balanceAfter = runningBalance + txnAmount;
           runningBalance = balanceAfter;
-          const isDebit = Number(txn.amount) < 0;
           const editCount = Number(txn.edit_count) || 0;
           const editHistory = editCount ? parseEditHistory(txn) : [];
           const isTransfer = isTransferTransaction(txn);
-          const isRequest = isRequestTransaction(txn);
 
           return (
             <View key={txn.id}>
@@ -1295,31 +1262,33 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 </View>
               )}
               <Pressable
-                style={[styles.chatRow, isDebit && styles.chatRowDebit]}
+                style={[
+                  styles.chatRow,
+                  Number(txn.amount) < 0 && styles.chatRowDebit,
+                ]}
                 onLongPress={() => openTransactionMenu(txn)}
                 delayLongPress={250}>
                 <View
                   style={[
                     styles.chatBubble,
-                    isDebit && styles.chatBubbleDebit,
+                    Number(txn.amount) > 0 && styles.chatBubbleCredit,
+                    Number(txn.amount) < 0 && styles.chatBubbleDebit,
                     isDeleted && styles.chatBubbleDeleted,
                   ]}>
                   <View style={styles.chatHeader}>
                     <View
                       style={[
                         styles.chatIcon,
-                        isDebit && styles.chatIconDebit,
+                        Number(txn.amount) < 0 && styles.chatIconDebit,
                         isTransfer && styles.chatIconTransfer,
                       ]}>
                       <Icon
-                        name={isDebit ? 'arrow-down' : 'arrow-up'}
+                        name={Number(txn.amount) < 0 ? 'arrow-down' : 'arrow-up'}
                         size={16}
                         color={
                           isTransfer
                             ? '#3B82F6'
-                            : isRequest
-                            ? '#10B981'
-                            : isDebit
+                            : Number(txn.amount) < 0
                             ? '#EF4444'
                             : '#10B981'
                         }
@@ -1328,25 +1297,26 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                     <Text
                       style={[
                         styles.chatAmount,
-                        isDebit && styles.chatAmountDebit,
+                        Number(txn.amount) < 0 && styles.chatAmountDebit,
                         isTransfer && styles.chatAmountTransfer,
-                        isRequest && styles.chatAmountRequest,
                         isDeleted && styles.chatAmountDeleted,
                       ]}>
-                      {(isDebit ? '-' : '+') +
-                        formatCurrency(Math.abs(Number(txn.amount) || 0))}
+                      {isDeleted
+                        ? `Deleted ${formatCurrency(
+                            Math.abs(Number(txn.amount) || 0)
+                          )}`
+                        : (Number(txn.amount) < 0 ? '-' : '+') +
+                          formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
                   </View>
-                  {txn.remark ? (
-                    <Text
-                      style={[
-                        styles.chatRemark,
-                        isDeleted && styles.chatRemarkDeleted,
-                      ]}>
-                      {txn.remark}
-                    </Text>
+                  {!isDeleted && txn.remark ? (
+                    <Text style={styles.chatRemark}>{txn.remark}</Text>
                   ) : null}
-                  <View style={[styles.chatMeta, isDebit && styles.chatMetaDebit]}>
+                  <View
+                    style={[
+                      styles.chatMeta,
+                      Number(txn.amount) < 0 && styles.chatMetaDebit,
+                    ]}>
                     <Text style={styles.chatBalance}>
                       {formatCurrency(balanceAfter)}
                     </Text>
@@ -1363,9 +1333,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                         .join(' -> ')}`}
                     </Text>
                   )}
-                  {isDeleted && (
-                    <Text style={styles.deletedWatermark}>DELETED</Text>
-                  )}
                 </View>
               </Pressable>
             </View>
@@ -1375,7 +1342,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     );
   };
 
-  return (
+  const showDayPicker = scheduleType === 'weekly' || scheduleType === '2weeks';
+  const showDatePicker = ['monthly', '2months', '3months', '6months'].includes(scheduleType);
+
+    return (
     <View
       style={[
         styles.container,
@@ -1392,9 +1362,11 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
           },
         ]}>
         <View style={styles.headerTopRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color={colors.text.primary} />
-        </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}>
+            <Icon name="arrow-back" size={24} color={colors.text.primary} />
+          </TouchableOpacity>
           <Text
             style={[
               styles.headerTitle,
@@ -1402,9 +1374,11 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
             ]}>
             {account.account_name}
           </Text>
-        <TouchableOpacity onPress={openAccountMenu} style={styles.menuButton}>
-          <Icon name="ellipsis-vertical" size={22} color={colors.text.primary} />
-        </TouchableOpacity>
+          <TouchableOpacity
+            onPress={openAccountMenu}
+            style={styles.menuButton}>
+            <Icon name="ellipsis-vertical" size={22} color={colors.text.primary} />
+          </TouchableOpacity>
         </View>
         <View style={styles.accountMetricsWrapper}>
           <View style={styles.accountMetricsCard}>
@@ -1536,71 +1510,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         contentContainerStyle={styles.scrollContent}
         onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({animated: false})}>
         {/* Transaction History */}
-        <View style={styles.historySection}>{renderTransactions()}</View>
-      </ScrollView>
-
-      <Modal
-        visible={lowBalancePromptVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeLowBalancePrompt}>
-        <View style={styles.promptOverlay}>
-          <View style={styles.promptCard}>
-            <Text style={styles.promptTitle}>Low balance</Text>
-            <Text style={styles.promptMessage}>
-              Balance is low in{' '}
-              <Text
-                style={[
-                  styles.promptAccountName,
-                  account.icon_color && {color: account.icon_color},
-                ]}>
-                {account.account_name}
-              </Text>
-              . Request {formatCurrency(pendingWithdrawAmount || 0)} from{' '}
-              <Text
-                style={[
-                  styles.promptAccountName,
-                  primaryEarningAccount?.icon_color && {
-                    color: primaryEarningAccount.icon_color,
-                  },
-                ]}>
-                {primaryEarningAccount?.account_name || 'primary account'}
-              </Text>
-              ?
-            </Text>
-            <TouchableOpacity
-              style={styles.promptRemember}
-              onPress={() =>
-                setRememberLowBalanceChoice(current => !current)
-              }>
-              <View
-                style={[
-                  styles.promptCheckbox,
-                  rememberLowBalanceChoice && styles.promptCheckboxChecked,
-                ]}>
-                {rememberLowBalanceChoice && (
-                  <Icon name="checkmark" size={14} color={colors.white} />
-                )}
-              </View>
-              <Text style={styles.promptRememberText}>
-                Remember my choice for this account
-              </Text>
-            </TouchableOpacity>
-            <View style={styles.promptActions}>
-              <TouchableOpacity
-                style={[styles.promptButton, styles.promptButtonSecondary]}
-                onPress={handleLowBalancePromptNo}>
-                <Text style={styles.promptButtonTextSecondary}>No</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.promptButton, styles.promptButtonPrimary]}
-                onPress={handleLowBalancePromptYes}>
-                <Text style={styles.promptButtonTextPrimary}>Yes</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+        <View style={styles.historySection}>
+          {renderTransactions()}
         </View>
-      </Modal>
+      </ScrollView>
 
       {/* Bottom Fixed Section */}
       <View
@@ -1610,38 +1523,42 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
             borderTopColor: withAlpha(account.icon_color, 0.3),
           },
         ]}>
-        {/* Action Buttons */}
+        {/* Received and Given Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={styles.receivedButton}
-            onPress={() => setWithdrawModalVisible(true)}>
+            onPress={() => {
+              setWithdrawModalVisible(true);
+              focusWithdrawAmountInput();
+            }}>
             <Icon name="arrow-down" size={20} color="#EF4444" />
-            <Text style={styles.receivedButtonText}>Withdraw</Text>
+            <Text style={styles.receivedButtonText}>Withdraw / Transfer</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.givenButton}
-            onPress={() => setRequestModalVisible(true)}>
+            onPress={() => {
+              setAddModalVisible(true);
+              focusAddAmountInput();
+            }}>
             <Icon name="arrow-up" size={20} color="#10B981" />
-            <Text style={styles.givenButtonText}>Request Amount</Text>
+            <Text style={styles.givenButtonText}>Add Ammount</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <Modal
-        visible={withdrawModalVisible}
+        visible={addModalVisible}
         transparent
         animationType="none"
-        onRequestClose={() => {
-          setWithdrawModalVisible(false);
-          setWithdrawNote('');
-        }}>
+        onRequestClose={() => setAddModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.modalBackdrop}
             activeOpacity={1}
             onPress={() => {
-              setWithdrawModalVisible(false);
-              setWithdrawNote('');
+              setAddModalVisible(false);
+              setAddNote('');
+              setAmount('');
             }}
           />
           <Animated.View
@@ -1659,22 +1576,23 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
               },
             ]}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Withdraw</Text>
+            <Text style={styles.modalTitle}>Add Amount</Text>
             <TextInput
               style={styles.modalAmountInput}
-              value={withdrawAmount}
-              onChangeText={setWithdrawAmount}
+              value={amount}
+              onChangeText={setAmount}
               keyboardType="numeric"
-              autoFocus
-              ref={withdrawAmountInputRef}
-              showSoftInputOnFocus
-              editable={!loading}
-            />
+                autoFocus
+                ref={addAmountInputRef}
+                showSoftInputOnFocus
+                editable={!loading}
+                onLayout={focusAddAmountInput}
+              />
             <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
             <TextInput
               style={styles.modalNoteInput}
-              value={withdrawNote}
-              onChangeText={setWithdrawNote}
+              value={addNote}
+              onChangeText={setAddNote}
               placeholder="Add a note"
               placeholderTextColor={colors.text.light}
               multiline
@@ -1688,16 +1606,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 loading && styles.buttonDisabled,
               ]}
               onPress={async () => {
-                const didAdd = await handleWithdraw();
+                const didAdd = await handleAddEntry();
                 if (didAdd) {
-                  setWithdrawModalVisible(false);
+                  setAddModalVisible(false);
                 }
               }}
               disabled={loading}>
               {loading ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.modalAddButtonText}>Withdraw</Text>
+                <Text style={styles.modalAddButtonText}>Add</Text>
               )}
             </TouchableOpacity>
           </Animated.View>
@@ -1705,20 +1623,18 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       </Modal>
 
       <Modal
-        visible={requestModalVisible}
+        visible={withdrawModalVisible}
         transparent
         animationType="none"
-        onRequestClose={() => {
-          setRequestModalVisible(false);
-          setRequestNote('');
-        }}>
+        onRequestClose={() => setWithdrawModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.modalBackdrop}
             activeOpacity={1}
             onPress={() => {
-              setRequestModalVisible(false);
-              setRequestNote('');
+              setWithdrawModalVisible(false);
+              setWithdrawAmount('');
+              setWithdrawNote('');
             }}
           />
           <Animated.View
@@ -1735,117 +1651,238 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 ],
               },
             ]}>
-            {requestSelectVisible && (
+            {transferSelectVisible && (
               <Pressable
                 style={styles.transferDismissOverlay}
-                onPress={() => setRequestSelectVisible(false)}
+                onPress={() => setTransferSelectVisible(false)}
               />
             )}
             <View style={styles.modalContent}>
               <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>Request Amount</Text>
-              <View style={styles.amountFieldWrapper}>
-                <View
-                  style={styles.amountFieldRow}
-                  onLayout={event =>
-                    setRequestFieldHeight(event.nativeEvent.layout.height)
-                  }>
-                  <TextInput
-                    style={styles.amountInputBare}
-                    value={requestAmount}
-                    onChangeText={setRequestAmount}
-                    keyboardType="numeric"
-                    autoFocus
-                    ref={requestAmountInputRef}
-                    showSoftInputOnFocus
-                    editable={!loading}
-                  />
-                  <View style={styles.amountFieldDivider} />
-                  <TouchableOpacity
-                    style={styles.amountAccountButton}
-                    onPress={() =>
-                      setRequestSelectVisible(current => !current)
-                    }
-                    onLayout={event =>
-                      setRequestAccountWidth(event.nativeEvent.layout.width)
-                    }
-                    disabled={requestAccounts.length === 0}>
-                    <Text
-                      style={[
-                        styles.amountAccountText,
-                        requestTarget?.icon_color && {
-                          color: requestTarget.icon_color,
-                        },
-                      ]}
-                      numberOfLines={1}>
-                      {requestTarget?.account_name ||
-                        (requestAccounts.length
-                          ? 'Select account'
-                          : 'No accounts')}
-                    </Text>
-                    <Icon
-                      name="chevron-down"
-                      size={16}
-                      color={colors.text.secondary}
-                    />
-                  </TouchableOpacity>
-                </View>
-                {requestSelectVisible && (
-                  <View
+              <View style={styles.modeToggle}>
+                <View style={styles.modeOption}>
+                  <AnimatedTouchableOpacity
                     style={[
-                      styles.floatingAccountList,
+                      styles.modeButton,
                       {
-                        bottom: requestFieldHeight + 6,
-                        right: 0,
-                        width: requestAccountWidth || 140,
+                        backgroundColor: withdrawPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['rgba(239, 68, 68, 0)', 'rgba(239, 68, 68, 0.12)'],
+                        }),
                       },
-                    ]}>
-                    <ScrollView
-                      style={styles.floatingAccountScroll}
-                      showsVerticalScrollIndicator={false}
-                      keyboardShouldPersistTaps="handled">
-                      {requestAccounts.map(item => {
-                        const isSelected = requestTarget?.id === item.id;
-                        const itemColor =
-                          item.icon_color || colors.text.primary;
-                        return (
-                          <TouchableOpacity
-                            key={item.id}
-                            style={[
-                              styles.floatingAccountItem,
-                              isSelected && styles.floatingAccountItemSelected,
-                            ]}
-                            onPress={() => {
-                              setRequestTarget(item);
-                              setRequestSelectVisible(false);
-                            }}>
-                            <Text
-                              style={[
-                                styles.floatingAccountText,
-                                {color: itemColor},
-                                isSelected && styles.floatingAccountTextSelected,
-                              ]}>
-                              {item.account_name}
-                            </Text>
-                            {isSelected && (
-                              <Icon
-                                name="checkmark-circle"
-                                size={16}
-                                color={itemColor}
-                              />
-                            )}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                )}
+                      withdrawMode === 'withdraw' && styles.modeButtonActive,
+                    ]}
+                    onPress={() => {
+                      setWithdrawMode('withdraw');
+                      clearPulseAnimation();
+                      if (!withdrawDefaultMode && !hasDefaultPrompted) {
+                        runDefaultHighlight();
+                        setHasDefaultPrompted(true);
+                      }
+                    }}>
+                    <View style={styles.modeButtonContent}>
+                      <Text
+                        style={[
+                          styles.modeButtonText,
+                          withdrawMode === 'withdraw' && styles.modeButtonTextActive,
+                        ]}>
+                        Withdraw
+                      </Text>
+                      {withdrawDefaultMode === 'withdraw' && (
+                        <View style={styles.defaultBadge}>
+                          <Text style={styles.defaultBadgeText}>Default</Text>
+                        </View>
+                      )}
+                    </View>
+                  </AnimatedTouchableOpacity>
+                </View>
+                <View style={styles.modeOption}>
+                  <AnimatedTouchableOpacity
+                    style={[
+                      styles.modeButton,
+                      {
+                        backgroundColor: transferPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['rgba(239, 68, 68, 0)', 'rgba(239, 68, 68, 0.12)'],
+                        }),
+                      },
+                      withdrawMode === 'transfer' && styles.modeButtonActive,
+                    ]}
+                    onPress={() => {
+                      setWithdrawMode('transfer');
+                      clearPulseAnimation();
+                      if (!withdrawDefaultMode && !hasDefaultPrompted) {
+                        runDefaultHighlight();
+                        setHasDefaultPrompted(true);
+                      }
+                    }}>
+                    <View style={styles.modeButtonContent}>
+                      <Text
+                        style={[
+                          styles.modeButtonText,
+                          withdrawMode === 'transfer' && styles.modeButtonTextActive,
+                        ]}>
+                        Transfer
+                      </Text>
+                      {withdrawDefaultMode === 'transfer' && (
+                        <View style={styles.defaultBadge}>
+                          <Text style={styles.defaultBadgeText}>Default</Text>
+                        </View>
+                      )}
+                    </View>
+                  </AnimatedTouchableOpacity>
+                </View>
               </View>
+              {withdrawMode &&
+                withdrawMode !== withdrawDefaultMode && (
+                  <AnimatedTouchableOpacity
+                    style={styles.setDefaultButton}
+                    onPress={() => {
+                      const message =
+                        withdrawMode === 'withdraw'
+                          ? 'Now withdraw is your default option.'
+                          : 'Now transfer is your default option.';
+                      showToast(message, 'success');
+                      AsyncStorage.setItem('withdrawDefaultMode', withdrawMode)
+                        .then(() => {
+                          setWithdrawDefaultMode(withdrawMode);
+                        })
+                        .catch(error => {
+                          console.error('Failed to save withdraw default mode:', error);
+                        });
+                    }}>
+                    <Animated.View
+                      style={[
+                        styles.setDefaultGlow,
+                        {
+                          backgroundColor: defaultPulse.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['rgba(16, 185, 129, 0)', 'rgba(16, 185, 129, 0.14)'],
+                          }),
+                        },
+                      ]}>
+                      <Text style={styles.setDefaultText}>Set as default</Text>
+                    </Animated.View>
+                  </AnimatedTouchableOpacity>
+                )}
+              <Text style={styles.modalTitle}>
+                {withdrawMode === 'transfer' ? 'Transfer' : 'Withdraw'}
+              </Text>
+              {withdrawMode === 'transfer' ? (
+                <View style={styles.amountFieldWrapper}>
+                  <View
+                    style={styles.amountFieldRow}
+                    onLayout={event =>
+                      setAmountFieldHeight(event.nativeEvent.layout.height)
+                    }>
+                    <TextInput
+                      style={styles.amountInputBare}
+                      value={withdrawAmount}
+                      onChangeText={setWithdrawAmount}
+                      keyboardType="numeric"
+                      autoFocus
+                      ref={withdrawAmountInputRef}
+                      showSoftInputOnFocus
+                      editable={!loading}
+                    />
+                    <View style={styles.amountFieldDivider} />
+                    <TouchableOpacity
+                      style={styles.amountAccountButton}
+                      onPress={() =>
+                        setTransferSelectVisible(current => !current)
+                      }
+                      onLayout={event =>
+                        setAmountAccountWidth(event.nativeEvent.layout.width)
+                      }
+                      disabled={transferAccounts.length === 0}>
+                      <Text
+                        style={[
+                          styles.amountAccountText,
+                          transferTarget?.icon_color && {
+                            color: transferTarget.icon_color,
+                          },
+                        ]}
+                        numberOfLines={1}>
+                        {transferTarget?.account_name ||
+                          (transferAccounts.length
+                            ? 'Select account'
+                            : 'No accounts')}
+                      </Text>
+                      <Icon
+                        name="chevron-down"
+                        size={16}
+                        color={colors.text.secondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  {transferSelectVisible && (
+                    <View
+                      style={[
+                        styles.floatingAccountList,
+                        {
+                          bottom: amountFieldHeight + 6,
+                          right: 0,
+                          width: amountAccountWidth || 140,
+                        },
+                      ]}>
+                      <ScrollView
+                        style={styles.floatingAccountScroll}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled">
+                        {transferAccounts.map(item => {
+                          const isSelected = transferTarget?.id === item.id;
+                          const itemColor =
+                            item.icon_color || colors.text.primary;
+                          return (
+                            <TouchableOpacity
+                              key={item.id}
+                              style={[
+                                styles.floatingAccountItem,
+                                isSelected && styles.floatingAccountItemSelected,
+                              ]}
+                              onPress={() => {
+                                setTransferTarget(item);
+                                setTransferSelectVisible(false);
+                              }}>
+                              <Text
+                                style={[
+                                  styles.floatingAccountText,
+                                  {color: itemColor},
+                                  isSelected && styles.floatingAccountTextSelected,
+                                ]}>
+                                {item.account_name}
+                              </Text>
+                              {isSelected && (
+                                <Icon
+                                  name="checkmark-circle"
+                                  size={16}
+                                  color={itemColor}
+                                />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <TextInput
+                  style={styles.modalAmountInput}
+                  value={withdrawAmount}
+                  onChangeText={setWithdrawAmount}
+                  keyboardType="numeric"
+                  autoFocus
+                  ref={withdrawAmountInputRef}
+                  showSoftInputOnFocus
+                  editable={!loading}
+                />
+              )}
               <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
               <TextInput
                 style={styles.modalNoteInput}
-                value={requestNote}
-                onChangeText={setRequestNote}
+                value={withdrawNote}
+                onChangeText={setWithdrawNote}
                 placeholder="Add a note"
                 placeholderTextColor={colors.text.light}
                 multiline
@@ -1859,22 +1896,45 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                   loading && styles.buttonDisabled,
                 ]}
                 onPress={async () => {
-                  const didOpen = await handleRequestStart();
-                  if (didOpen) {
-                    setRequestModalVisible(false);
+                  if (!withdrawMode) {
+                    showToast(
+                      'You need to select one of the options above.',
+                      'error'
+                    );
+                    runModeHighlightSequence();
+                    return;
+                  }
+                  if (withdrawMode === 'transfer') {
+                    const didTransfer = await handleTransfer(transferTarget);
+                    if (didTransfer) {
+                      setWithdrawModalVisible(false);
+                    }
+                    return;
+                  }
+                  const didAdd = await handleWithdraw();
+                  if (didAdd) {
+                    setWithdrawModalVisible(false);
                   }
                 }}
                 disabled={loading}>
                 {loading ? (
                   <ActivityIndicator color={colors.white} />
                 ) : (
-                  <Text style={styles.modalAddButtonText}>Request</Text>
+                  <Text style={styles.modalAddButtonText}>
+                    {withdrawMode === 'transfer' ? 'Transfer' : 'Withdraw'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
           </Animated.View>
         </View>
       </Modal>
+
+      <BottomSheet
+        visible={isBottomSheetVisible}
+        onClose={() => setBottomSheetVisible(false)}>
+        {renderBottomSheetContent()}
+      </BottomSheet>
 
       <Modal
         visible={optionsVisible}
@@ -1976,36 +2036,20 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 if (!selectedTransaction) {
                   return;
                 }
-                const isLinked = isLockedTransaction(selectedTransaction);
-                const warningText = isLinked
-                  ? 'Deleting here will also delete the linked entry from your earning account. This may cause confusion in your accounts.'
-                  : 'Are you sure you want to delete this entry?';
                 Alert.alert(
                   'Delete Entry',
-                  warningText,
+                  'Are you sure you want to delete this entry?',
                   [
                     {text: 'Cancel', style: 'cancel'},
                     {
                       text: 'Delete',
                       style: 'destructive',
                       onPress: async () => {
+                        const deleteHistory = buildDeleteHistory(
+                          selectedTransaction
+                        );
                         closeOptionsMenu(true);
                         try {
-                          if (isLinked) {
-                            const linked = getLinkedEarningTransaction(
-                              selectedTransaction
-                            );
-                            if (linked) {
-                              const linkedHistory = buildDeleteHistory(linked);
-                              await deleteTransaction(
-                                linked.id,
-                                linked.account_id,
-                                linkedHistory
-                              );
-                            }
-                          }
-                          const deleteHistory =
-                            buildDeleteHistory(selectedTransaction);
                           await deleteTransaction(
                             selectedTransaction.id,
                             account.id,
@@ -2058,6 +2102,101 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         </Animated.View>
       </Modal>
 
+      <Modal
+        visible={editAmountVisible}
+        transparent
+        animationType="none"
+        onRequestClose={() => setEditAmountVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setEditAmountVisible(false)}
+          />
+          <Animated.View
+            style={[
+              styles.modalSheet,
+              {
+                transform: [
+                  {
+                    translateY: modalSlideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [260, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Edit Amount</Text>
+            <TextInput
+              style={styles.modalAmountInput}
+                value={editAmount}
+                onChangeText={setEditAmount}
+                keyboardType="numeric"
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
+              onPress={handleUpdateAmount}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.modalAddButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={editRemarkVisible}
+        transparent
+        animationType="none"
+        onRequestClose={() => setEditRemarkVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setEditRemarkVisible(false)}
+          />
+          <Animated.View
+            style={[
+              styles.modalSheet,
+              {
+                transform: [
+                  {
+                    translateY: modalSlideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [260, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Edit Remark</Text>
+            <TextInput
+              style={styles.modalAmountInput}
+              placeholder="Remark"
+              value={editRemark}
+              onChangeText={setEditRemark}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
+              onPress={handleUpdateRemark}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.modalAddButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
       <Modal
         visible={menuVisible}
         transparent
@@ -2112,6 +2251,35 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                   color={colors.text.primary}
                 />
                 <Text style={styles.optionText}>Personalization</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={() => {
+                if (!isPrimary) {
+                  handleTogglePrimary();
+                }
+                closeAccountMenu();
+              }}
+              disabled={isPrimary}>
+              <View style={styles.optionRow}>
+                <View style={styles.optionItemRow}>
+                  <Icon
+                    name="star-outline"
+                    size={20}
+                    color={isPrimary ? '#10B981' : colors.text.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.optionText,
+                      isPrimary && styles.optionTextSelected,
+                    ]}>
+                    {isPrimary ? 'Primary Account' : 'Set as Primary'}
+                  </Text>
+                </View>
+                {isPrimary && (
+                  <Icon name="checkmark" size={18} color="#10B981" />
+                )}
               </View>
             </TouchableOpacity>
             <TouchableOpacity
@@ -2174,104 +2342,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       </Modal>
 
       <Modal
-        visible={editAmountVisible}
-        transparent
-        animationType="none"
-        onRequestClose={() => setEditAmountVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => setEditAmountVisible(false)}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Edit Amount</Text>
-            <TextInput
-              style={styles.modalAmountInput}
-              value={editAmount}
-              onChangeText={setEditAmount}
-              keyboardType="numeric"
-              autoFocus
-              editable={!loading}
-            />
-            <TouchableOpacity
-              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
-              onPress={handleUpdateAmount}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalAddButtonText}>Save</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={editRemarkVisible}
-        transparent
-        animationType="none"
-        onRequestClose={() => setEditRemarkVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => setEditRemarkVisible(false)}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Edit Remark</Text>
-            <TextInput
-              style={styles.modalTextInput}
-              placeholder="Remark"
-              value={editRemark}
-              onChangeText={setEditRemark}
-              editable={!loading}
-              multiline
-            />
-            <TouchableOpacity
-              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
-              onPress={handleUpdateRemark}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalAddButtonText}>Save</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={renameModalVisible}
         transparent
         animationType="none"
@@ -2318,12 +2388,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
           </Animated.View>
         </View>
       </Modal>
-
-      <BottomSheet
-        visible={isBottomSheetVisible}
-        onClose={() => setBottomSheetVisible(false)}>
-        {renderBottomSheetContent()}
-      </BottomSheet>
     </View>
   );
 };
@@ -2331,7 +2395,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#F9FAFB',
   },
   header: {
     paddingHorizontal: spacing.md,
@@ -2360,76 +2424,6 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 4,
   },
-  optionsOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  optionsOverlayTouchable: {
-    flex: 1,
-  },
-  optionsContainer: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: spacing.lg,
-    elevation: 10,
-    shadowColor: colors.black,
-    shadowOffset: {width: 0, height: -4},
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  optionsHeader: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  optionsTitle: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: colors.text.primary,
-    textAlign: 'center',
-  },
-  optionButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  optionItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  optionText: {
-    fontSize: fontSize.regular,
-    fontWeight: fontWeight.medium,
-    color: colors.text.primary,
-  },
-  optionTextDisabled: {
-    color: colors.text.light,
-  },
-  optionDelete: {
-    backgroundColor: 'transparent',
-  },
-  optionDeleteText: {
-    color: '#B91C1C',
-  },
-  optionButtonDisabled: {
-    opacity: 0.6,
-  },
-  optionButtonCancel: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    marginTop: spacing.sm,
-  },
-  optionTextCancel: {
-    fontSize: fontSize.regular,
-    fontWeight: fontWeight.medium,
-    color: colors.text.secondary,
-  },
-  accountMetricsWrapper: {
-    paddingTop: spacing.sm,
-  },
   scrollView: {
     flex: 1,
   },
@@ -2438,6 +2432,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     padding: spacing.md,
     paddingBottom: spacing.xl,
+  },
+  accountMetricsWrapper: {
+    paddingTop: spacing.sm,
   },
   accountMetricsCard: {
     backgroundColor: 'transparent',
@@ -2605,231 +2602,6 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontWeight: fontWeight.semibold,
   },
-  historySection: {
-    marginTop: spacing.lg,
-    marginBottom: spacing.xl,
-  },
-  chatList: {
-    gap: spacing.md,
-  },
-  datePill: {
-    alignSelf: 'center',
-    backgroundColor: '#D9E7E3',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    marginBottom: spacing.sm,
-  },
-  datePillText: {
-    fontSize: fontSize.small,
-    color: '#4B5563',
-    fontWeight: fontWeight.semibold,
-  },
-  chatRow: {
-    alignItems: 'flex-end',
-    marginBottom: spacing.sm,
-  },
-  chatRowDebit: {
-    alignItems: 'flex-start',
-  },
-  chatBubble: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 10,
-    minWidth: '70%',
-    overflow: 'hidden',
-  },
-  chatBubbleDebit: {
-    backgroundColor: colors.white,
-    borderColor: colors.border,
-  },
-  chatBubbleDeleted: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#E5E7EB',
-  },
-  chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  chatIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#D1FAE5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chatIconDebit: {
-    backgroundColor: '#FEE2E2',
-  },
-  chatIconTransfer: {
-    backgroundColor: 'rgba(59, 130, 246, 0.16)',
-  },
-  chatAmount: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: '#10B981',
-    flex: 1,
-  },
-  chatAmountDebit: {
-    color: '#EF4444',
-  },
-  chatAmountTransfer: {
-    color: '#3B82F6',
-  },
-  chatAmountRequest: {
-    color: '#10B981',
-  },
-  chatAmountDeleted: {
-    color: colors.text.secondary,
-  },
-  chatTime: {
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-  },
-  chatRemark: {
-    fontSize: fontSize.medium,
-    color: colors.text.primary,
-  },
-  chatRemarkDeleted: {
-    color: colors.text.secondary,
-  },
-  deletedWatermark: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '30%',
-    textAlign: 'center',
-    fontSize: 38,
-    fontWeight: fontWeight.bold,
-    color: '#9CA3AF',
-    opacity: 0.12,
-    transform: [{rotate: '-12deg'}],
-  },
-  editHistoryText: {
-    marginTop: 4,
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-  },
-  chatMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
-  },
-  chatMetaDebit: {
-    alignItems: 'flex-start',
-  },
-  chatMetaRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  chatBalance: {
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-  },
-  emptyHistory: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: fontSize.medium,
-    color: colors.text.secondary,
-    marginTop: 12,
-  },
-  bottomSection: {
-    backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingBottom: spacing.md,
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  bottomNavIcon: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xs,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  balanceLabel: {
-    fontSize: fontSize.medium,
-    color: colors.text.primary,
-  },
-  balanceAmount: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  balanceValue: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: '#10B981',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    gap: spacing.md,
-  },
-  receivedButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.white,
-    paddingVertical: spacing.md,
-    borderRadius: 8,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#EF4444',
-  },
-  receivedButtonText: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: '#EF4444',
-  },
-  givenButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.white,
-    paddingVertical: spacing.md,
-    borderRadius: 8,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#10B981',
-  },
-  givenButtonText: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: '#10B981',
-  },
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -2868,6 +2640,111 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     marginBottom: spacing.sm,
   },
+  modalNoteLabel: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  modalNoteInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+    textAlignVertical: 'top',
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 999,
+    padding: 4,
+    marginBottom: spacing.sm,
+    gap: 8,
+  },
+  modeOption: {
+    flex: 1,
+  },
+  modeButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 999,
+  },
+  modeButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.white,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  modeButtonText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.secondary,
+  },
+  modeButtonTextActive: {
+    color: colors.text.primary,
+  },
+  setDefaultButton: {
+    alignItems: 'center',
+    paddingTop: 6,
+  },
+  setDefaultGlow: {
+    alignSelf: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  setDefaultText: {
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    color: '#10B981',
+  },
+  defaultBadge: {
+    marginLeft: 6,
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  defaultBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    color: '#166534',
+  },
+  defaultToast: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    top: spacing.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 10,
+    elevation: 6,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  defaultToastText: {
+    color: colors.white,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    textAlign: 'center',
+  },
   modalAmountInput: {
     backgroundColor: colors.white,
     borderWidth: 1,
@@ -2888,23 +2765,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: colors.text.primary,
     marginBottom: spacing.md,
-  },
-  modalNoteLabel: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  modalNoteInput: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    fontSize: fontSize.medium,
-    color: colors.text.primary,
-    marginBottom: spacing.md,
-    textAlignVertical: 'top',
   },
   amountFieldWrapper: {
     position: 'relative',
@@ -2989,107 +2849,417 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
   modalAddButtonText: {
     fontSize: fontSize.regular,
     fontWeight: fontWeight.bold,
     color: colors.white,
   },
-  transferList: {
-    maxHeight: 280,
-  },
-  transferItem: {
-    paddingVertical: 12,
-    paddingHorizontal: spacing.sm,
-    borderRadius: 10,
-    backgroundColor: '#F9FAFB',
-    marginBottom: spacing.xs,
-  },
-  transferName: {
-    fontSize: fontSize.medium,
-    color: colors.text.primary,
-    fontWeight: fontWeight.semibold,
-  },
-  promptOverlay: {
+  optionsOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  promptCard: {
-    width: '100%',
-    maxWidth: 360,
+  optionsOverlayTouchable: {
+    flex: 1,
+  },
+  optionsContainer: {
     backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: spacing.md,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: spacing.lg,
+    elevation: 10,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: -4},
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  promptTitle: {
+  optionsHeader: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  optionsTitle: {
     fontSize: fontSize.large,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
-    marginBottom: spacing.xs,
+    textAlign: 'center',
   },
-  promptMessage: {
-    fontSize: fontSize.medium,
-    color: colors.text.secondary,
-    marginBottom: spacing.md,
+  optionButton: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
-  promptAccountName: {
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  optionItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  optionText: {
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.medium,
+    color: colors.text.primary,
+  },
+  optionTextDisabled: {
+    color: colors.text.light,
+  },
+  optionTextSelected: {
+    color: '#10B981',
     fontWeight: fontWeight.semibold,
   },
-  promptRemember: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
+  optionDelete: {
+    backgroundColor: 'transparent',
   },
-  promptCheckbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm,
-    backgroundColor: colors.white,
+  optionDeleteText: {
+    color: '#B91C1C',
   },
-  promptCheckboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+  optionButtonDisabled: {
+    opacity: 0.6,
   },
-  promptRememberText: {
-    fontSize: fontSize.small,
+  optionButtonCancel: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    marginTop: spacing.sm,
+  },
+  optionTextCancel: {
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.medium,
     color: colors.text.secondary,
   },
-  promptActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
+  section: {
+    marginBottom: spacing.md,
   },
-  promptButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  promptButtonSecondary: {
-    backgroundColor: '#F3F4F6',
-  },
-  promptButtonPrimary: {
-    backgroundColor: colors.primary,
-  },
-  promptButtonTextSecondary: {
+  label: {
     fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
     color: colors.text.primary,
+    marginBottom: spacing.xs,
   },
-  promptButtonTextPrimary: {
+  amountInput: {
+    backgroundColor: colors.white,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 24,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.md,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    marginHorizontal: spacing.md,
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+  },
+  pickerContainer: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  picker: {
+    height: 50,
+  },
+  addButton: {
+    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: spacing.md,
+    gap: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  addButtonText: {
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.bold,
+    color: colors.white,
+  },
+  totalSection: {
+    backgroundColor: '#10B981',
+    padding: 20,
+    borderRadius: 12,
+    marginTop: spacing.lg,
+    alignItems: 'center',
+  },
+  totalLabel: {
+    fontSize: fontSize.medium,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  totalAmount: {
+    fontSize: 32,
+    fontWeight: fontWeight.bold,
+    color: colors.white,
+    marginTop: 4,
+  },
+  historySection: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  historyTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    marginBottom: spacing.sm,
+  },
+  chatList: {
+    gap: spacing.md,
+  },
+  datePill: {
+    alignSelf: 'center',
+    backgroundColor: '#D9E7E3',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginBottom: spacing.sm,
+  },
+  datePillText: {
+    fontSize: fontSize.small,
+    color: '#4B5563',
+    fontWeight: fontWeight.semibold,
+  },
+  chatRow: {
+    alignItems: 'flex-end',
+    marginBottom: spacing.sm,
+  },
+  chatRowDebit: {
+    alignItems: 'flex-start',
+  },
+  chatBubble: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 10,
+    minWidth: '70%',
+  },
+  chatBubbleCredit: {
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+  },
+  chatBubbleDebit: {
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  chatHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chatIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#D1FAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatIconDebit: {
+    backgroundColor: '#FEE2E2',
+  },
+  chatIconTransfer: {
+    backgroundColor: 'rgba(59, 130, 246, 0.16)',
+  },
+  chatAmount: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: '#10B981',
+    flex: 1,
+  },
+  chatAmountDebit: {
+    color: '#EF4444',
+  },
+  chatAmountTransfer: {
+    color: '#3B82F6',
+  },
+  chatTime: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+  },
+  editedTag: {
+    marginLeft: 8,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  chatRemark: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+  },
+  editHistoryText: {
+    marginTop: 4,
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+  },
+  chatMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 8,
+  },
+  chatMetaDebit: {
+    alignItems: 'flex-start',
+  },
+  chatMetaRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  chatBalance: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+  },
+  toastContainer: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    top: spacing.md,
+    alignItems: 'center',
+  },
+  toast: {
+    backgroundColor: 'rgba(220, 38, 38, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  toastText: {
+    color: colors.white,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+  },
+  moreDots: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  emptyHistory: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: fontSize.medium,
+    color: colors.text.secondary,
+    marginTop: 12,
+  },
+  bottomSection: {
+    backgroundColor: colors.white,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingBottom: spacing.md,
+  },
+  bottomNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  bottomNavIcon: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xs,
+  },
+  moreText: {
+    fontSize: 10,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  balanceLabel: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+  },
+  balanceAmount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  balanceValue: {
+    fontSize: fontSize.xlarge,
+    fontWeight: fontWeight.bold,
+    color: '#10B981',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    gap: spacing.md,
+  },
+  receivedButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    paddingVertical: spacing.md,
+    borderRadius: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  receivedButtonText: {
     fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
-    color: colors.white,
+    color: '#EF4444',
+  },
+  givenButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    paddingVertical: spacing.md,
+    borderRadius: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  givenButtonText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: '#10B981',
   },
 });
 
-export default ExpensesAccountDetailScreen;
+export default AccountDetailScreen;

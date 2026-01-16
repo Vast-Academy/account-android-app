@@ -34,13 +34,12 @@ const ACCOUNT_ICONS = [
 ];
 
 const ACCOUNT_COLORS = [
-  {id: 'teal', value: '#14B8A6'},
-  {id: 'navy', value: '#1E40AF'},
-  {id: 'purple', value: '#8B5CF6'},
-  {id: 'brown', value: '#A16207'},
-  {id: 'cyan', value: '#06B6D4'},
-  {id: 'pink', value: '#EC4899'},
-  {id: 'gray', value: '#6B7280'},
+  {id: 'blue', value: '#60A5FA'},
+  {id: 'cyan', value: '#22D3EE'},
+  {id: 'teal', value: '#2DD4BF'},
+  {id: 'pink', value: '#F472B6'},
+  {id: 'orange', value: '#FB923C'},
+  {id: 'yellow', value: '#FACC15'},
 ];
 
 const renderAccountIcon = (iconName, size, color) => {
@@ -237,7 +236,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
           style={[modalContainerStyle, {transform: [{translateY: modalTranslateY}]}]}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Add New Account</Text>
+            <Text style={styles.title}>Create New Account</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Icon name="close" size={28} color={colors.text.secondary} />
             </TouchableOpacity>
@@ -306,7 +305,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                           }}>
                           {renderAccountIcon(
                             icon.name,
-                            20,
+                            22,
                             selectedIcon === icon.name
                               ? colors.white
                               : colors.text.primary,
@@ -456,7 +455,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                     {loading ? (
                       <ActivityIndicator color={colors.white} />
                     ) : (
-                  <Text style={styles.inlineCreateText}>Add</Text>
+                      <Text style={styles.inlineCreateText}>Create</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -494,7 +493,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: {
-    fontSize: fontSize.large,
+    fontSize: fontSize.medium,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
   },
@@ -571,9 +570,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-    marginBottom: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.md,
   },
   inlinePickerTitle: {
     fontSize: fontSize.medium,
@@ -636,11 +635,11 @@ const styles = StyleSheet.create({
     color: colors.white,
   },
   inputGroup: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   earningLimitNote: {
     marginTop: spacing.sm,
-    fontSize: 12,
+    fontSize: fontSize.medium,
     color: colors.text.secondary,
     fontWeight: fontWeight.medium,
   },
@@ -688,7 +687,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 2,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   primaryRowDisabled: {
     opacity: 0.7,
@@ -735,9 +734,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   iconOption: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
@@ -750,9 +749,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   colorOption: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },

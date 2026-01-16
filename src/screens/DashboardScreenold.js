@@ -506,6 +506,9 @@ const DashboardScreen = ({route, navigation}) => {
       accountsList.forEach(account => {
         const txns = getTransactionsByAccount(account.id);
         txns.forEach(txn => {
+          if (Number(txn.is_deleted) === 1) {
+            return;
+          }
           if (
             txn.transaction_date >= startTime &&
             (endTime === null || txn.transaction_date <= endTime)
@@ -554,6 +557,9 @@ const DashboardScreen = ({route, navigation}) => {
       accountsList.forEach(account => {
         const txns = getTransactionsByAccount(account.id);
         txns.forEach(txn => {
+          if (Number(txn.is_deleted) === 1) {
+            return;
+          }
           if (
             txn.transaction_date >= startTime &&
             txn.transaction_date <= endTime

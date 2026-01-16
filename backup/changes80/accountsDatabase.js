@@ -4,44 +4,11 @@ import {queueBackupFromStorage} from '../utils/backupQueue';
 
 const DB_NAME = 'accountsDB.db';
 const LEGACY_RED_400 = '#F87171';
-const LEGACY_BLUE_400 = '#60A5FA';
-const LEGACY_CYAN_400 = '#22D3EE';
-const LEGACY_TEAL_400 = '#2DD4BF';
-const LEGACY_PINK_400 = '#F472B6';
-const LEGACY_ORANGE_400 = '#FB923C';
-const LEGACY_YELLOW_400 = '#FACC15';
-const LEGACY_INDIGO_400 = '#818CF8';
-const LEGACY_PURPLE_400 = '#A78BFA';
-const LEGACY_BROWN_400 = '#B45309';
-const LEGACY_MAGENTA_400 = '#E879F9';
-const LEGACY_GRAY_400 = '#9CA3AF';
+const BROWN_400 = '#8D6E63';
 const LEGACY_INDIGO_500 = '#6366F1';
-const LEGACY_MAGENTA_500 = '#D946EF';
-
-const TEAL_500 = '#14B8A6';
 const NAVY_500 = '#1E40AF';
-const PURPLE_500 = '#8B5CF6';
-const BROWN_500 = '#A16207';
-const CYAN_500 = '#06B6D4';
+const LEGACY_MAGENTA_500 = '#D946EF';
 const PINK_500 = '#EC4899';
-const GRAY_500 = '#6B7280';
-
-const COLOR_MIGRATION_MAP = {
-  [LEGACY_RED_400]: BROWN_500,
-  [LEGACY_BLUE_400]: NAVY_500,
-  [LEGACY_CYAN_400]: CYAN_500,
-  [LEGACY_TEAL_400]: TEAL_500,
-  [LEGACY_PINK_400]: PINK_500,
-  [LEGACY_ORANGE_400]: BROWN_500,
-  [LEGACY_YELLOW_400]: BROWN_500,
-  [LEGACY_INDIGO_400]: NAVY_500,
-  [LEGACY_PURPLE_400]: PURPLE_500,
-  [LEGACY_BROWN_400]: BROWN_500,
-  [LEGACY_MAGENTA_400]: PINK_500,
-  [LEGACY_GRAY_400]: GRAY_500,
-  [LEGACY_INDIGO_500]: NAVY_500,
-  [LEGACY_MAGENTA_500]: PINK_500,
-};
 
 const migrateAccountTypeToExpenses = db => {
   let startedTransaction = false;
@@ -106,9 +73,14 @@ const normalizeAccountColor = account => {
   if (!account || !account.icon_color) {
     return account;
   }
-  const mappedColor = COLOR_MIGRATION_MAP[account.icon_color];
-  if (mappedColor) {
-    return {...account, icon_color: mappedColor};
+  if (account.icon_color === LEGACY_RED_400) {
+    return {...account, icon_color: BROWN_400};
+  }
+  if (account.icon_color === LEGACY_INDIGO_500) {
+    return {...account, icon_color: NAVY_500};
+  }
+  if (account.icon_color === LEGACY_MAGENTA_500) {
+    return {...account, icon_color: PINK_500};
   }
   return account;
 };
@@ -166,12 +138,22 @@ export const initAccountsDatabase = () => {
     }
     migrateAccountTypeToExpenses(db);
     try {
-      Object.entries(COLOR_MIGRATION_MAP).forEach(([oldColor, newColor]) => {
-        db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
-          newColor,
-          oldColor,
-        ]);
-      });
+      db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
+        BROWN_400,
+        LEGACY_RED_400,
+      ]);
+    } catch (e) {
+      // Ignore update errors (db may be locked/empty)
+    }
+    try {
+      db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
+        NAVY_500,
+        LEGACY_INDIGO_500,
+      ]);
+      db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
+        PINK_500,
+        LEGACY_MAGENTA_500,
+      ]);
     } catch (e) {
       // Ignore update errors (db may be locked/empty)
     }

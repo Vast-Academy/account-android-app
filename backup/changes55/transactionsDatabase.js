@@ -26,8 +26,6 @@ export const initTransactionsDatabase = () => {
         remark TEXT,
         edit_history TEXT,
         edit_count INTEGER DEFAULT 0,
-        is_deleted INTEGER DEFAULT 0,
-        deleted_at INTEGER,
         transaction_date INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
         FOREIGN KEY (account_id) REFERENCES accounts (id)
@@ -43,21 +41,6 @@ export const initTransactionsDatabase = () => {
       db.execute('ALTER TABLE transactions ADD COLUMN edit_count INTEGER DEFAULT 0');
     } catch (e) {
       // Column already exists, ignore
-    }
-    try {
-      db.execute('ALTER TABLE transactions ADD COLUMN is_deleted INTEGER DEFAULT 0');
-    } catch (e) {
-      // Column already exists, ignore
-    }
-    try {
-      db.execute('ALTER TABLE transactions ADD COLUMN deleted_at INTEGER');
-    } catch (e) {
-      // Column already exists, ignore
-    }
-    try {
-      db.execute('UPDATE transactions SET is_deleted = 0 WHERE is_deleted IS NULL');
-    } catch (e) {
-      // Ignore update errors
     }
 
     console.log('Transactions database initialized successfully');
@@ -125,7 +108,7 @@ export const calculateAccountBalance = (accountId) => {
   try {
     const db = getDB();
     const result = db.execute(
-      'SELECT SUM(amount) as total FROM transactions WHERE account_id = ? AND is_deleted = 0',
+      'SELECT SUM(amount) as total FROM transactions WHERE account_id = ?',
       [accountId]
     );
 
@@ -164,25 +147,10 @@ const updateAccountBalance = async (accountId) => {
 };
 
 // Delete transaction
-export const deleteTransaction = async (
-  transactionId,
-  accountId,
-  editHistory = null
-) => {
+export const deleteTransaction = async (transactionId, accountId) => {
   try {
     const db = getDB();
-    const timestamp = Date.now();
-    if (editHistory !== null) {
-      db.execute(
-        'UPDATE transactions SET is_deleted = 1, deleted_at = ?, edit_history = ? WHERE id = ?',
-        [timestamp, editHistory, transactionId]
-      );
-    } else {
-      db.execute(
-        'UPDATE transactions SET is_deleted = 1, deleted_at = ? WHERE id = ?',
-        [timestamp, transactionId]
-      );
-    }
+    db.execute('DELETE FROM transactions WHERE id = ?', [transactionId]);
 
     // Update account balance
     await updateAccountBalance(accountId);

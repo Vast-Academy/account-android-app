@@ -1336,6 +1336,11 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                       {(isDebit ? '-' : '+') +
                         formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
+                    {isDeleted && (
+                      <View style={styles.deletedBadge}>
+                        <Text style={styles.deletedBadgeText}>Deleted</Text>
+                      </View>
+                    )}
                   </View>
                   {txn.remark ? (
                     <Text
@@ -1362,9 +1367,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                         .map(formatEditHistoryValue)
                         .join(' -> ')}`}
                     </Text>
-                  )}
-                  {isDeleted && (
-                    <Text style={styles.deletedWatermark}>DELETED</Text>
                   )}
                 </View>
               </Pressable>
@@ -2639,7 +2641,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 10,
     minWidth: '70%',
-    overflow: 'hidden',
   },
   chatBubbleDebit: {
     backgroundColor: colors.white,
@@ -2698,17 +2699,18 @@ const styles = StyleSheet.create({
   chatRemarkDeleted: {
     color: colors.text.secondary,
   },
-  deletedWatermark: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '30%',
-    textAlign: 'center',
-    fontSize: 38,
-    fontWeight: fontWeight.bold,
-    color: '#9CA3AF',
-    opacity: 0.12,
-    transform: [{rotate: '-12deg'}],
+  deletedBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+  },
+  deletedBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   editHistoryText: {
     marginTop: 4,

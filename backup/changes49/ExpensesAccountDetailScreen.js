@@ -441,62 +441,15 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     const remark = String(txn?.remark || '').trim().toLowerCase();
     return (
       remark.startsWith('transferred to ') ||
-      remark.startsWith('transferred from ')
-    );
-  };
-
-  const isRequestTransaction = txn => {
-    const remark = String(txn?.remark || '').trim().toLowerCase();
-    return (
+      remark.startsWith('transferred from ') ||
+      remark.startsWith('requested to ') ||
       remark.startsWith('requested from ') ||
-      remark.startsWith('requested by ') ||
-      remark.startsWith('requested to ')
+      remark.startsWith('requested by ')
     );
-  };
-
-  const isLockedTransaction = txn =>
-    isTransferTransaction(txn) || isRequestTransaction(txn);
-
-  const getLinkedEarningTransaction = txn => {
-    if (!txn) {
-      return null;
-    }
-    const remark = String(txn.remark || '').trim();
-    if (!remark) {
-      return null;
-    }
-    if (!isLockedTransaction(txn)) {
-      return null;
-    }
-    const amountValue = Math.abs(Number(txn.amount) || 0);
-    if (!amountValue) {
-      return null;
-    }
-    const earningAccounts = getAccountsByType('earning');
-    let bestMatch = null;
-    let bestDelta = Number.POSITIVE_INFINITY;
-    earningAccounts.forEach(earning => {
-      const earningTxns = getTransactionsByAccount(earning.id);
-      earningTxns.forEach(entry => {
-        const entryAmount = Math.abs(Number(entry.amount) || 0);
-        if (entryAmount !== amountValue) {
-          return;
-        }
-        const delta = Math.abs(Number(entry.transaction_date) - Number(txn.transaction_date));
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestMatch = entry;
-        }
-      });
-    });
-    return bestMatch;
   };
 
   const canEditRemark = txn => {
     if (!txn) {
-      return false;
-    }
-    if (Number(txn.is_deleted) === 1) {
       return false;
     }
     const amount = Number(txn.amount);
@@ -515,45 +468,14 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }
   };
 
-  const formatEditHistoryValue = value => {
-    if (value === 'Deleted') {
-      return 'Deleted';
-    }
-    return formatCurrency(Number(value) || 0);
-  };
-
-  const buildDeleteHistory = txn => {
-    const editCount = Number(txn?.edit_count) || 0;
-    if (!editCount) {
-      return null;
-    }
-    const history = parseEditHistory(txn);
-    const amountAbs = Math.abs(Number(txn?.amount) || 0);
-    const base = history.length ? history : [amountAbs];
-    return JSON.stringify([...base, 'Deleted']);
-  };
-
   const getLatestTransactionId = () => {
     if (!transactions || transactions.length === 0) {
       return null;
     }
-    let latest = null;
-    for (let i = 0; i < transactions.length; i += 1) {
-      const txn = transactions[i];
-      if (Number(txn.is_deleted) === 1) {
-        continue;
-      }
-      if (!latest) {
-        latest = txn;
-        continue;
-      }
-      const currentDate = Number(txn.transaction_date) || 0;
-      const latestDate = Number(latest.transaction_date) || 0;
-      if (
-        currentDate > latestDate ||
-        (currentDate === latestDate && Number(txn.id) > Number(latest.id))
-      ) {
-        latest = txn;
+    let latest = transactions[0];
+    for (let i = 1; i < transactions.length; i += 1) {
+      if (transactions[i].transaction_date > latest.transaction_date) {
+        latest = transactions[i];
       }
     }
     return latest?.id ?? null;
@@ -563,14 +485,11 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (!txn) {
       return false;
     }
-    if (Number(txn.is_deleted) === 1) {
-      return false;
-    }
     const latestId = getLatestTransactionId();
     if (!latestId || txn.id !== latestId) {
       return false;
     }
-    if (isLockedTransaction(txn)) {
+    if (isTransferTransaction(txn)) {
       return false;
     }
     const editCount = Number(txn.edit_count) || 0;
@@ -585,11 +504,11 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (!txn) {
       return false;
     }
-    if (Number(txn.is_deleted) === 1) {
-      return false;
-    }
     const latestId = getLatestTransactionId();
     if (!latestId || txn.id !== latestId) {
+      return false;
+    }
+    if (isTransferTransaction(txn)) {
       return false;
     }
     const amount = Number(txn.amount);
@@ -1012,9 +931,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     let withdrawals = 0;
 
     transactions.forEach(txn => {
-      if (Number(txn.is_deleted) === 1) {
-        return;
-      }
       if (
         txn.transaction_date >= startTime &&
         (endTime === null || txn.transaction_date <= endTime)
@@ -1046,9 +962,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     let withdrawals = 0;
 
     transactions.forEach(txn => {
-      if (Number(txn.is_deleted) === 1) {
-        return;
-      }
       if (
         txn.transaction_date >= startTime &&
         txn.transaction_date <= endTime
@@ -1275,15 +1188,12 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
           const showDate = dateKey !== lastDateKey;
           lastDateKey = dateKey;
 
-          const isDeleted = Number(txn.is_deleted) === 1;
-          const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
-          const balanceAfter = runningBalance + txnAmount;
+          const balanceAfter = runningBalance + (Number(txn.amount) || 0);
           runningBalance = balanceAfter;
           const isDebit = Number(txn.amount) < 0;
           const editCount = Number(txn.edit_count) || 0;
           const editHistory = editCount ? parseEditHistory(txn) : [];
           const isTransfer = isTransferTransaction(txn);
-          const isRequest = isRequestTransaction(txn);
 
           return (
             <View key={txn.id}>
@@ -1298,12 +1208,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 style={[styles.chatRow, isDebit && styles.chatRowDebit]}
                 onLongPress={() => openTransactionMenu(txn)}
                 delayLongPress={250}>
-                <View
-                  style={[
-                    styles.chatBubble,
-                    isDebit && styles.chatBubbleDebit,
-                    isDeleted && styles.chatBubbleDeleted,
-                  ]}>
+                <View style={[styles.chatBubble, isDebit && styles.chatBubbleDebit]}>
                   <View style={styles.chatHeader}>
                     <View
                       style={[
@@ -1314,15 +1219,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                       <Icon
                         name={isDebit ? 'arrow-down' : 'arrow-up'}
                         size={16}
-                        color={
-                          isTransfer
-                            ? '#3B82F6'
-                            : isRequest
-                            ? '#10B981'
-                            : isDebit
-                            ? '#EF4444'
-                            : '#10B981'
-                        }
+                        color={isTransfer ? '#3B82F6' : isDebit ? '#EF4444' : '#10B981'}
                       />
                     </View>
                     <Text
@@ -1330,21 +1227,13 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                         styles.chatAmount,
                         isDebit && styles.chatAmountDebit,
                         isTransfer && styles.chatAmountTransfer,
-                        isRequest && styles.chatAmountRequest,
-                        isDeleted && styles.chatAmountDeleted,
                       ]}>
                       {(isDebit ? '-' : '+') +
                         formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
                   </View>
                   {txn.remark ? (
-                    <Text
-                      style={[
-                        styles.chatRemark,
-                        isDeleted && styles.chatRemarkDeleted,
-                      ]}>
-                      {txn.remark}
-                    </Text>
+                    <Text style={styles.chatRemark}>{txn.remark}</Text>
                   ) : null}
                   <View style={[styles.chatMeta, isDebit && styles.chatMetaDebit]}>
                     <Text style={styles.chatBalance}>
@@ -1359,12 +1248,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                   {editHistory.length > 1 && (
                     <Text style={styles.editHistoryText}>
                       {`Edited: ${editHistory
-                        .map(formatEditHistoryValue)
+                        .map(value => formatCurrency(Number(value) || 0))
                         .join(' -> ')}`}
                     </Text>
-                  )}
-                  {isDeleted && (
-                    <Text style={styles.deletedWatermark}>DELETED</Text>
                   )}
                 </View>
               </Pressable>
@@ -1976,13 +1862,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 if (!selectedTransaction) {
                   return;
                 }
-                const isLinked = isLockedTransaction(selectedTransaction);
-                const warningText = isLinked
-                  ? 'Deleting here will also delete the linked entry from your earning account. This may cause confusion in your accounts.'
-                  : 'Are you sure you want to delete this entry?';
                 Alert.alert(
                   'Delete Entry',
-                  warningText,
+                  'Are you sure you want to delete this entry?',
                   [
                     {text: 'Cancel', style: 'cancel'},
                     {
@@ -1991,25 +1873,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                       onPress: async () => {
                         closeOptionsMenu(true);
                         try {
-                          if (isLinked) {
-                            const linked = getLinkedEarningTransaction(
-                              selectedTransaction
-                            );
-                            if (linked) {
-                              const linkedHistory = buildDeleteHistory(linked);
-                              await deleteTransaction(
-                                linked.id,
-                                linked.account_id,
-                                linkedHistory
-                              );
-                            }
-                          }
-                          const deleteHistory =
-                            buildDeleteHistory(selectedTransaction);
                           await deleteTransaction(
                             selectedTransaction.id,
-                            account.id,
-                            deleteHistory
+                            account.id
                           );
                           loadTransactions();
                           setSelectedTransaction(null);
@@ -2639,15 +2505,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 10,
     minWidth: '70%',
-    overflow: 'hidden',
   },
   chatBubbleDebit: {
-    backgroundColor: colors.white,
-    borderColor: colors.border,
-  },
-  chatBubbleDeleted: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#E5E7EB',
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
   },
   chatHeader: {
     flexDirection: 'row',
@@ -2681,12 +2542,6 @@ const styles = StyleSheet.create({
   chatAmountTransfer: {
     color: '#3B82F6',
   },
-  chatAmountRequest: {
-    color: '#10B981',
-  },
-  chatAmountDeleted: {
-    color: colors.text.secondary,
-  },
   chatTime: {
     fontSize: fontSize.small,
     color: colors.text.secondary,
@@ -2694,21 +2549,6 @@ const styles = StyleSheet.create({
   chatRemark: {
     fontSize: fontSize.medium,
     color: colors.text.primary,
-  },
-  chatRemarkDeleted: {
-    color: colors.text.secondary,
-  },
-  deletedWatermark: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '30%',
-    textAlign: 'center',
-    fontSize: 38,
-    fontWeight: fontWeight.bold,
-    color: '#9CA3AF',
-    opacity: 0.12,
-    transform: [{rotate: '-12deg'}],
   },
   editHistoryText: {
     marginTop: 4,

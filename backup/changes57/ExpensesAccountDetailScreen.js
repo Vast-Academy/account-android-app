@@ -1333,18 +1333,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                         isRequest && styles.chatAmountRequest,
                         isDeleted && styles.chatAmountDeleted,
                       ]}>
-                      {(isDebit ? '-' : '+') +
-                        formatCurrency(Math.abs(Number(txn.amount) || 0))}
+                      {isDeleted
+                        ? `Deleted ${formatCurrency(
+                            Math.abs(Number(txn.amount) || 0)
+                          )}`
+                        : (isDebit ? '-' : '+') +
+                          formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
                   </View>
-                  {txn.remark ? (
-                    <Text
-                      style={[
-                        styles.chatRemark,
-                        isDeleted && styles.chatRemarkDeleted,
-                      ]}>
-                      {txn.remark}
-                    </Text>
+                  {!isDeleted && txn.remark ? (
+                    <Text style={styles.chatRemark}>{txn.remark}</Text>
                   ) : null}
                   <View style={[styles.chatMeta, isDebit && styles.chatMetaDebit]}>
                     <Text style={styles.chatBalance}>
@@ -1362,9 +1360,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                         .map(formatEditHistoryValue)
                         .join(' -> ')}`}
                     </Text>
-                  )}
-                  {isDeleted && (
-                    <Text style={styles.deletedWatermark}>DELETED</Text>
                   )}
                 </View>
               </Pressable>
@@ -2639,7 +2634,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 10,
     minWidth: '70%',
-    overflow: 'hidden',
   },
   chatBubbleDebit: {
     backgroundColor: colors.white,
@@ -2694,21 +2688,6 @@ const styles = StyleSheet.create({
   chatRemark: {
     fontSize: fontSize.medium,
     color: colors.text.primary,
-  },
-  chatRemarkDeleted: {
-    color: colors.text.secondary,
-  },
-  deletedWatermark: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '30%',
-    textAlign: 'center',
-    fontSize: 38,
-    fontWeight: fontWeight.bold,
-    color: '#9CA3AF',
-    opacity: 0.12,
-    transform: [{rotate: '-12deg'}],
   },
   editHistoryText: {
     marginTop: 4,

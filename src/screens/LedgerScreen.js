@@ -906,8 +906,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   headerRow: {
-    height: 28,
-    marginBottom: spacing.sm,
+    height: 0,
+    marginBottom: 0,
   },
   metricsRow: {
     flexDirection: 'row',

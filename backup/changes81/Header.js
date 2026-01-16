@@ -168,7 +168,7 @@ const Header = ({user, onBackupPress, onProfileUpdate}) => {
       <TouchableOpacity
         style={styles.backupButton}
         onPress={onBackupPress}>
-        <Feather name="save" size={20} color={colors.text.primary} />
+        <Feather name="refresh-ccw" size={20} color={colors.text.primary} />
         <Text style={styles.backupLabel}>Backup</Text>
       </TouchableOpacity>
 

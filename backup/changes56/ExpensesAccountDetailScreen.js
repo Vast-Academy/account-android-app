@@ -496,9 +496,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (!txn) {
       return false;
     }
-    if (Number(txn.is_deleted) === 1) {
-      return false;
-    }
     const amount = Number(txn.amount);
     return Number.isFinite(amount);
   };
@@ -515,45 +512,20 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }
   };
 
-  const formatEditHistoryValue = value => {
-    if (value === 'Deleted') {
-      return 'Deleted';
-    }
-    return formatCurrency(Number(value) || 0);
-  };
-
-  const buildDeleteHistory = txn => {
-    const editCount = Number(txn?.edit_count) || 0;
-    if (!editCount) {
-      return null;
-    }
-    const history = parseEditHistory(txn);
-    const amountAbs = Math.abs(Number(txn?.amount) || 0);
-    const base = history.length ? history : [amountAbs];
-    return JSON.stringify([...base, 'Deleted']);
-  };
-
   const getLatestTransactionId = () => {
     if (!transactions || transactions.length === 0) {
       return null;
     }
-    let latest = null;
-    for (let i = 0; i < transactions.length; i += 1) {
-      const txn = transactions[i];
-      if (Number(txn.is_deleted) === 1) {
-        continue;
-      }
-      if (!latest) {
-        latest = txn;
-        continue;
-      }
-      const currentDate = Number(txn.transaction_date) || 0;
+    let latest = transactions[0];
+    for (let i = 1; i < transactions.length; i += 1) {
+      const currentDate = Number(transactions[i].transaction_date) || 0;
       const latestDate = Number(latest.transaction_date) || 0;
       if (
         currentDate > latestDate ||
-        (currentDate === latestDate && Number(txn.id) > Number(latest.id))
+        (currentDate === latestDate &&
+          Number(transactions[i].id) > Number(latest.id))
       ) {
-        latest = txn;
+        latest = transactions[i];
       }
     }
     return latest?.id ?? null;
@@ -561,9 +533,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
   const canEditAmount = txn => {
     if (!txn) {
-      return false;
-    }
-    if (Number(txn.is_deleted) === 1) {
       return false;
     }
     const latestId = getLatestTransactionId();
@@ -583,9 +552,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
   const canDeleteTransaction = txn => {
     if (!txn) {
-      return false;
-    }
-    if (Number(txn.is_deleted) === 1) {
       return false;
     }
     const latestId = getLatestTransactionId();
@@ -1012,9 +978,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     let withdrawals = 0;
 
     transactions.forEach(txn => {
-      if (Number(txn.is_deleted) === 1) {
-        return;
-      }
       if (
         txn.transaction_date >= startTime &&
         (endTime === null || txn.transaction_date <= endTime)
@@ -1046,9 +1009,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     let withdrawals = 0;
 
     transactions.forEach(txn => {
-      if (Number(txn.is_deleted) === 1) {
-        return;
-      }
       if (
         txn.transaction_date >= startTime &&
         txn.transaction_date <= endTime
@@ -1275,9 +1235,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
           const showDate = dateKey !== lastDateKey;
           lastDateKey = dateKey;
 
-          const isDeleted = Number(txn.is_deleted) === 1;
-          const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
-          const balanceAfter = runningBalance + txnAmount;
+          const balanceAfter = runningBalance + (Number(txn.amount) || 0);
           runningBalance = balanceAfter;
           const isDebit = Number(txn.amount) < 0;
           const editCount = Number(txn.edit_count) || 0;
@@ -1298,12 +1256,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 style={[styles.chatRow, isDebit && styles.chatRowDebit]}
                 onLongPress={() => openTransactionMenu(txn)}
                 delayLongPress={250}>
-                <View
-                  style={[
-                    styles.chatBubble,
-                    isDebit && styles.chatBubbleDebit,
-                    isDeleted && styles.chatBubbleDeleted,
-                  ]}>
+                <View style={[styles.chatBubble, isDebit && styles.chatBubbleDebit]}>
                   <View style={styles.chatHeader}>
                     <View
                       style={[
@@ -1331,20 +1284,13 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                         isDebit && styles.chatAmountDebit,
                         isTransfer && styles.chatAmountTransfer,
                         isRequest && styles.chatAmountRequest,
-                        isDeleted && styles.chatAmountDeleted,
                       ]}>
                       {(isDebit ? '-' : '+') +
                         formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
                   </View>
                   {txn.remark ? (
-                    <Text
-                      style={[
-                        styles.chatRemark,
-                        isDeleted && styles.chatRemarkDeleted,
-                      ]}>
-                      {txn.remark}
-                    </Text>
+                    <Text style={styles.chatRemark}>{txn.remark}</Text>
                   ) : null}
                   <View style={[styles.chatMeta, isDebit && styles.chatMetaDebit]}>
                     <Text style={styles.chatBalance}>
@@ -1359,12 +1305,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                   {editHistory.length > 1 && (
                     <Text style={styles.editHistoryText}>
                       {`Edited: ${editHistory
-                        .map(formatEditHistoryValue)
+                        .map(value => formatCurrency(Number(value) || 0))
                         .join(' -> ')}`}
                     </Text>
-                  )}
-                  {isDeleted && (
-                    <Text style={styles.deletedWatermark}>DELETED</Text>
                   )}
                 </View>
               </Pressable>
@@ -1996,20 +1939,12 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                               selectedTransaction
                             );
                             if (linked) {
-                              const linkedHistory = buildDeleteHistory(linked);
-                              await deleteTransaction(
-                                linked.id,
-                                linked.account_id,
-                                linkedHistory
-                              );
+                              await deleteTransaction(linked.id, linked.account_id);
                             }
                           }
-                          const deleteHistory =
-                            buildDeleteHistory(selectedTransaction);
                           await deleteTransaction(
                             selectedTransaction.id,
-                            account.id,
-                            deleteHistory
+                            account.id
                           );
                           loadTransactions();
                           setSelectedTransaction(null);
@@ -2639,15 +2574,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 10,
     minWidth: '70%',
-    overflow: 'hidden',
   },
   chatBubbleDebit: {
     backgroundColor: colors.white,
     borderColor: colors.border,
-  },
-  chatBubbleDeleted: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#E5E7EB',
   },
   chatHeader: {
     flexDirection: 'row',
@@ -2684,9 +2614,6 @@ const styles = StyleSheet.create({
   chatAmountRequest: {
     color: '#10B981',
   },
-  chatAmountDeleted: {
-    color: colors.text.secondary,
-  },
   chatTime: {
     fontSize: fontSize.small,
     color: colors.text.secondary,
@@ -2694,21 +2621,6 @@ const styles = StyleSheet.create({
   chatRemark: {
     fontSize: fontSize.medium,
     color: colors.text.primary,
-  },
-  chatRemarkDeleted: {
-    color: colors.text.secondary,
-  },
-  deletedWatermark: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '30%',
-    textAlign: 'center',
-    fontSize: 38,
-    fontWeight: fontWeight.bold,
-    color: '#9CA3AF',
-    opacity: 0.12,
-    transform: [{rotate: '-12deg'}],
   },
   editHistoryText: {
     marginTop: 4,

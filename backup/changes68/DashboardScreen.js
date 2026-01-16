@@ -120,7 +120,6 @@ const DashboardScreen = ({route, navigation}) => {
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const selectedAccountRef = useRef(null);
-  const deletePressGuardRef = useRef(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
   const [fabLayout, setFabLayout] = useState(null);
@@ -847,17 +846,6 @@ const DashboardScreen = ({route, navigation}) => {
     );
   };
 
-  const handleDeletePress = () => {
-    if (deletePressGuardRef.current) {
-      return;
-    }
-    deletePressGuardRef.current = true;
-    handleDeleteAccount();
-    setTimeout(() => {
-      deletePressGuardRef.current = false;
-    }, 400);
-  };
-
   const openRenameModal = () => {
     const account = selectedAccountRef.current || selectedAccount;
     if (!account) return;
@@ -1270,8 +1258,7 @@ const DashboardScreen = ({route, navigation}) => {
             <TouchableOpacity
               style={styles.contextMenuItem}
               hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
-              onPressIn={handleDeletePress}
-              onPress={handleDeletePress}>
+              onPress={handleDeleteAccount}>
               <Icon name="trash-outline" size={22} color={colors.error} />
               <Text style={[styles.contextMenuItemText, {color: colors.error}]}>
                 Delete

@@ -119,8 +119,6 @@ const DashboardScreen = ({route, navigation}) => {
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
-  const selectedAccountRef = useRef(null);
-  const deletePressGuardRef = useRef(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
   const [fabLayout, setFabLayout] = useState(null);
@@ -488,9 +486,6 @@ const DashboardScreen = ({route, navigation}) => {
       accountsList.forEach(account => {
         const txns = getTransactionsByAccount(account.id);
         txns.forEach(txn => {
-          if (Number(txn.is_deleted) === 1) {
-            return;
-          }
           if (
             txn.transaction_date >= startTime &&
             (endTime === null || txn.transaction_date <= endTime)
@@ -542,9 +537,6 @@ const DashboardScreen = ({route, navigation}) => {
       accountsList.forEach(account => {
         const txns = getTransactionsByAccount(account.id);
         txns.forEach(txn => {
-          if (Number(txn.is_deleted) === 1) {
-            return;
-          }
           if (
             txn.transaction_date >= startTime &&
             txn.transaction_date <= endTime
@@ -736,16 +728,10 @@ const DashboardScreen = ({route, navigation}) => {
   };
 
   const moveSelectedAccount = async direction => {
-    const account = selectedAccountRef.current || selectedAccount;
-    if (!account) {
+    if (!selectedAccount) {
       return;
     }
-    const currentIndex =
-      selectedAccountIndex >= 0
-        ? selectedAccountIndex
-        : accounts.findIndex(
-            item => String(item.id) === String(account.id)
-          );
+    const currentIndex = selectedAccountIndex;
     if (currentIndex < 0) {
       return;
     }
@@ -775,7 +761,6 @@ const DashboardScreen = ({route, navigation}) => {
   };
 
   const openContextMenu = account => {
-    selectedAccountRef.current = account;
     setSelectedAccount(account);
     setContextMenuVisible(true);
     Animated.parallel([
@@ -808,14 +793,12 @@ const DashboardScreen = ({route, navigation}) => {
     ]).start(() => {
       setContextMenuVisible(false);
       setSelectedAccount(null);
-      selectedAccountRef.current = null;
     });
   };
 
   const handleDeleteAccount = () => {
-    const account = selectedAccountRef.current || selectedAccount;
-    if (!account) return;
-    const balance = Number(account?.balance) || 0;
+    if (!selectedAccount) return;
+    const balance = Number(selectedAccount?.balance) || 0;
     if (Math.abs(balance) > 0.000001) {
       Alert.alert(
         'Balance Not Settled',
@@ -825,7 +808,7 @@ const DashboardScreen = ({route, navigation}) => {
     }
     Alert.alert(
       'Delete Account',
-      `Are you sure you want to delete the account "${account.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
+      `Are you sure you want to delete the account "${selectedAccount.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
       [
         {text: 'Cancel', style: 'cancel', onPress: closeContextMenu},
         {
@@ -833,7 +816,7 @@ const DashboardScreen = ({route, navigation}) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteAccountAndTransactions(account.id);
+              await deleteAccountAndTransactions(selectedAccount.id);
               showToast('Account deleted successfully', 'success');
               loadAccounts(); // Refresh the list
             } catch (e) {
@@ -847,21 +830,9 @@ const DashboardScreen = ({route, navigation}) => {
     );
   };
 
-  const handleDeletePress = () => {
-    if (deletePressGuardRef.current) {
-      return;
-    }
-    deletePressGuardRef.current = true;
-    handleDeleteAccount();
-    setTimeout(() => {
-      deletePressGuardRef.current = false;
-    }, 400);
-  };
-
   const openRenameModal = () => {
-    const account = selectedAccountRef.current || selectedAccount;
-    if (!account) return;
-    setNewAccountName(account?.account_name || ''); // Ensure newAccountName is always a string
+    if (!selectedAccount) return;
+    setNewAccountName(selectedAccount?.account_name || ''); // Ensure newAccountName is always a string
     setRenameModalVisible(true);
     closeContextMenu();
   };
@@ -1219,7 +1190,6 @@ const DashboardScreen = ({route, navigation}) => {
                 styles.contextMenuItem,
                 isMoveUpDisabled && styles.contextMenuItemDisabled,
               ]}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
               disabled={isMoveUpDisabled}
               onPress={() => moveSelectedAccount('up')}>
               <Icon
@@ -1242,7 +1212,6 @@ const DashboardScreen = ({route, navigation}) => {
                 styles.contextMenuItem,
                 isMoveDownDisabled && styles.contextMenuItemDisabled,
               ]}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
               disabled={isMoveDownDisabled}
               onPress={() => moveSelectedAccount('down')}>
               <Icon
@@ -1262,16 +1231,13 @@ const DashboardScreen = ({route, navigation}) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.contextMenuItem}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
               onPress={openRenameModal}>
               <Icon name="create-outline" size={22} color={colors.text.primary} />
               <Text style={styles.contextMenuItemText}>Rename</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.contextMenuItem}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
-              onPressIn={handleDeletePress}
-              onPress={handleDeletePress}>
+              onPress={handleDeleteAccount}>
               <Icon name="trash-outline" size={22} color={colors.error} />
               <Text style={[styles.contextMenuItemText, {color: colors.error}]}>
                 Delete
@@ -1279,7 +1245,6 @@ const DashboardScreen = ({route, navigation}) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.contextMenuItem}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
               onPress={() => {
                 Alert.alert('Personalization', 'Personalization options not yet implemented.');
                 closeContextMenu();
@@ -1289,7 +1254,6 @@ const DashboardScreen = ({route, navigation}) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.contextMenuItem, styles.contextMenuItemCancel]}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
               onPress={closeContextMenu}>
               <Icon name="close" size={22} color={colors.text.secondary} />
               <Text style={styles.contextMenuItemTextCancel}>Cancel</Text>

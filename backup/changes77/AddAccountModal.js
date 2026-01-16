@@ -34,13 +34,12 @@ const ACCOUNT_ICONS = [
 ];
 
 const ACCOUNT_COLORS = [
-  {id: 'teal', value: '#14B8A6'},
-  {id: 'navy', value: '#1E40AF'},
-  {id: 'purple', value: '#8B5CF6'},
-  {id: 'brown', value: '#A16207'},
-  {id: 'cyan', value: '#06B6D4'},
-  {id: 'pink', value: '#EC4899'},
-  {id: 'gray', value: '#6B7280'},
+  {id: 'blue', value: '#60A5FA'},
+  {id: 'cyan', value: '#22D3EE'},
+  {id: 'teal', value: '#2DD4BF'},
+  {id: 'pink', value: '#F472B6'},
+  {id: 'orange', value: '#FB923C'},
+  {id: 'yellow', value: '#FACC15'},
 ];
 
 const renderAccountIcon = (iconName, size, color) => {
@@ -64,6 +63,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
     ACCOUNT_COLORS[0].value,
   );
   const [keyboardPadding, setKeyboardPadding] = React.useState(0);
+  const [footerHeight, setFooterHeight] = React.useState(0);
   const [iconPickerVisible, setIconPickerVisible] = React.useState(false);
   const [colorPickerVisible, setColorPickerVisible] = React.useState(false);
   const earningRemaining = Math.max(0, 2 - earningCount);
@@ -217,8 +217,8 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
   const modalContainerStyle = {
     ...styles.modalContainer,
     maxHeight: keyboardPadding > 0
-      ? height - keyboardPadding  // When keyboard is visible (no gap)
-      : height * 0.8,                  // Normal state (80% of screen)
+      ? height - keyboardPadding - 12  // When keyboard is visible
+      : height * 0.7,                  // Normal state (70% of screen)
   };
 
   return (
@@ -237,7 +237,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
           style={[modalContainerStyle, {transform: [{translateY: modalTranslateY}]}]}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Add New Account</Text>
+            <Text style={styles.title}>Create New Account</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Icon name="close" size={28} color={colors.text.secondary} />
             </TouchableOpacity>
@@ -280,14 +280,13 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
             <View
               style={[
                 styles.scrollContent,
-                Platform.OS === 'android' && {
-                  paddingBottom: 0,
-                },
+                {paddingBottom: keyboardPadding + footerHeight + spacing.md},
               ]}>
               {/* Form */}
               <View style={styles.form}>
                 {iconPickerVisible && (
                   <View style={styles.inlinePicker}>
+                    <Text style={styles.inlinePickerTitle}>Choose Icon</Text>
                     <View style={styles.selectionGrid}>
                       {ACCOUNT_ICONS.map(icon => (
                         <TouchableOpacity
@@ -306,7 +305,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                           }}>
                           {renderAccountIcon(
                             icon.name,
-                            20,
+                            22,
                             selectedIcon === icon.name
                               ? colors.white
                               : colors.text.primary,
@@ -319,6 +318,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
 
                 {colorPickerVisible && (
                   <View style={styles.inlinePicker}>
+                    <Text style={styles.inlinePickerTitle}>Choose Color</Text>
                     <View style={styles.selectionGrid}>
                       {ACCOUNT_COLORS.map(color => (
                         <TouchableOpacity
@@ -432,39 +432,46 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                 </View>
               </View>
 
-              {/* Save Button */}
-              <View style={styles.buttonContainer}>
-                <View style={styles.inputWithButton}>
-                  <TextInput
-                    ref={accountNameInputRef}
-                    style={styles.inputInline}
-                    placeholder="Account Name (e.g., Salary, Savings)"
-                    placeholderTextColor={colors.text.secondary}
-                    value={accountName}
-                    onChangeText={setAccountName}
-                    autoCapitalize="words"
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    style={[
-                      styles.inlineCreateButton,
-                      {backgroundColor: selectedColor},
-                      loading && styles.buttonDisabled,
-                    ]}
-                    onPress={handleSave}
-                    disabled={loading}>
-                    {loading ? (
-                      <ActivityIndicator color={colors.white} />
-                    ) : (
-                  <Text style={styles.inlineCreateText}>Add</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
+              <View style={styles.buttonSpacer} />
             </View>
           </View>
         </Animated.View>
 
+        <View
+          style={[
+            styles.stickyFooter,
+            {bottom: keyboardPadding > 0 ? keyboardPadding : 0},
+          ]}
+          onLayout={event => {
+            setFooterHeight(event.nativeEvent.layout.height);
+          }}>
+          <View style={styles.inputWithButton}>
+            <TextInput
+              ref={accountNameInputRef}
+              style={styles.inputInline}
+              placeholder="Account Name (e.g., Salary, Savings)"
+              placeholderTextColor={colors.text.secondary}
+              value={accountName}
+              onChangeText={setAccountName}
+              autoCapitalize="words"
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={[
+                styles.inlineCreateButton,
+                {backgroundColor: selectedColor},
+                loading && styles.buttonDisabled,
+              ]}
+              onPress={handleSave}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.inlineCreateText}>Create</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     </Modal>
   );
@@ -484,7 +491,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: spacing.md,
-    paddingBottom: spacing.xs,
+    paddingBottom: spacing.sm,
     maxHeight: height * 0.8,
   },
   header: {
@@ -521,7 +528,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   previewCardText: {
-    fontSize: fontSize.medium,
+    fontSize: fontSize.regular,
     fontWeight: fontWeight.semibold,
     color: colors.white,
     textAlign: 'center',
@@ -571,9 +578,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-    marginBottom: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.md,
   },
   inlinePickerTitle: {
     fontSize: fontSize.medium,
@@ -589,7 +596,7 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   scrollContent: {
-    paddingBottom: spacing.xs,
+    paddingBottom: spacing.sm,
   },
   input: {
     backgroundColor: colors.white,
@@ -631,16 +638,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   inlineCreateText: {
-    fontSize: fontSize.medium,
+    fontSize: fontSize.small,
     fontWeight: fontWeight.bold,
     color: colors.white,
   },
+  buttonSpacer: {
+    height: spacing.md,
+  },
+  stickyFooter: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+  },
   inputGroup: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   earningLimitNote: {
     marginTop: spacing.sm,
-    fontSize: 12,
+    fontSize: fontSize.small,
     color: colors.text.secondary,
     fontWeight: fontWeight.medium,
   },
@@ -674,7 +689,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
   },
   segmentButtonText: {
-    fontSize: fontSize.medium,
+    fontSize: fontSize.small,
     fontWeight: fontWeight.semibold,
     color: colors.text.secondary,
   },
@@ -688,15 +703,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 2,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   primaryRowDisabled: {
     opacity: 0.7,
   },
   primaryToggle: {
-    width: 36,
-    height: 20,
-    borderRadius: 10,
+    width: 44,
+    height: 24,
+    borderRadius: 12,
     padding: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -711,14 +726,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#D1D5DB',
   },
   primaryKnob: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: colors.white,
-    transform: [{translateX: -8}],
+    transform: [{translateX: -10}],
   },
   primaryKnobActive: {
-    transform: [{translateX: 8}],
+    transform: [{translateX: 10}],
   },
   primaryText: {
     marginLeft: spacing.md,
@@ -735,9 +750,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   iconOption: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
@@ -750,9 +765,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   colorOption: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
