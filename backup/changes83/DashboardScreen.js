@@ -1038,164 +1038,94 @@ const DashboardScreen = ({route, navigation}) => {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         pointerEvents={showTutorialStep1 ? 'none' : 'auto'}>
-        {/* Earning Accounts */}
+        {/* My Accounts */}
         <View style={styles.accountsSection}>
-          <Text style={styles.sectionTitle}>Earning Accounts</Text>
+          <Text style={styles.sectionTitle}>My Accounts</Text>
           {accounts.length > 0 ? (
-            <>
-              <View style={styles.accountsList}>
-                {accounts
-                  .filter(account => account.account_type === 'earning')
-                  .map(account => (
-                    <TouchableOpacity
-                      key={account.id}
-                      style={styles.accountItem}
-                      onPress={() => {
-                        navigation.navigate('AccountDetail', {account});
-                      }}
-                      onLongPress={() => openContextMenu(account)}>
-                      <View style={styles.badgeContainer}>
-                        {account.is_primary === 1 && (
-                          <View
+            <View style={styles.accountsList}>
+              {accounts.map(account => (
+                <TouchableOpacity
+                  key={account.id}
+                  style={styles.accountItem}
+                  onPress={() => {
+                    // Navigate to different screens based on account type
+                    if (account.account_type === 'earning') {
+                      navigation.navigate('AccountDetail', {account});
+                    } else {
+                      navigation.navigate('ExpensesAccountDetail', {account});
+                    }
+                  }}
+                  onLongPress={() => openContextMenu(account)}>
+                  <Text
+                    pointerEvents="none"
+                    style={styles.accountTypeWatermark}>
+                    {account.account_type === 'earning' ? 'EARNING' : 'EXPENSES'}
+                  </Text>
+                  <View style={styles.badgeContainer}>
+                    {account.is_primary === 1 && (
+                      <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
+                        <Icon name="star" size={12} color={colors.white} />
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.accountRow}>
+                    {/* Account Icon */}
+                      <View
+                      style={[
+                        styles.accountIcon,
+                        {
+                          backgroundColor:
+                            account.icon_color ||
+                            (account.account_type === 'earning'
+                              ? colors.successLight
+                              : colors.warningLight),
+                        },
+                      ]}>
+                      {renderAccountIcon(
+                        account.icon ||
+                          (account.account_type === 'earning'
+                            ? 'trending-up'
+                            : 'wallet'),
+                        22,
+                        account.icon_color ? colors.white : colors.text.primary
+                      )}
+                    </View>
+
+                    {/* Account Details */}
+                    <View style={styles.accountDetails}>
+                      <View style={styles.accountHeader}>
+                        <View style={styles.accountHeaderContent}>
+                          <Text style={styles.accountName}>
+                            {account.account_name}
+                          </Text>
+                        </View>
+                      </View>
+                        <Text style={styles.accountBalanceRow}>
+                          <Text style={styles.accountBalanceLabel}>
+                            Balance{' '}
+                          </Text>
+                          <Text
                             style={[
-                              styles.badge,
-                              {backgroundColor: colors.text.light},
+                              styles.accountBalanceAmount,
+                              account.icon_color && {color: account.icon_color},
                             ]}>
-                            <Icon name="star" size={12} color={colors.white} />
-                          </View>
-                        )}
-                      </View>
-
-                      <View style={styles.accountRow}>
-                        <View
-                          style={[
-                            styles.accountIcon,
-                            {
-                              backgroundColor:
-                                account.icon_color || colors.successLight,
-                            },
-                          ]}>
-                          {renderAccountIcon(
-                            account.icon || 'trending-up',
-                            22,
-                            account.icon_color
-                              ? colors.white
-                              : colors.text.primary
-                          )}
-                        </View>
-
-                        <View style={styles.accountDetails}>
-                          <View style={styles.accountHeader}>
-                            <View style={styles.accountHeaderContent}>
-                              <Text style={styles.accountName}>
-                                {account.account_name}
-                              </Text>
-                            </View>
-                          </View>
-                          <Text style={styles.accountBalanceRow}>
-                            <Text style={styles.accountBalanceLabel}>
-                              Balance{' '}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.accountBalanceAmount,
-                                account.icon_color && {
-                                  color: account.icon_color,
-                                },
-                              ]}>
-                              {formatCurrency(account.balance || 0)}
-                            </Text>
+                            {formatCurrency(account.balance || 0)}
                           </Text>
-                          <Text style={styles.accountDate}>
-                            Created on{' '}
-                            {new Date(account.created_at).toLocaleDateString(
-                              'en-IN',
-                              {
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric',
-                              }
-                            )}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-              </View>
-
-              <View style={styles.accountsDivider} />
-
-              <Text style={styles.sectionTitle}>Expenses Accounts</Text>
-              <View style={styles.accountsList}>
-                {accounts
-                  .filter(account => account.account_type === 'expenses')
-                  .map(account => (
-                    <TouchableOpacity
-                      key={account.id}
-                      style={styles.accountItem}
-                      onPress={() => {
-                        navigation.navigate('ExpensesAccountDetail', {account});
-                      }}
-                      onLongPress={() => openContextMenu(account)}>
-                      <View style={styles.badgeContainer} />
-
-                      <View style={styles.accountRow}>
-                        <View
-                          style={[
-                            styles.accountIcon,
-                            {
-                              backgroundColor:
-                                account.icon_color || colors.warningLight,
-                            },
-                          ]}>
-                          {renderAccountIcon(
-                            account.icon || 'wallet',
-                            22,
-                            account.icon_color
-                              ? colors.white
-                              : colors.text.primary
-                          )}
-                        </View>
-
-                        <View style={styles.accountDetails}>
-                          <View style={styles.accountHeader}>
-                            <View style={styles.accountHeaderContent}>
-                              <Text style={styles.accountName}>
-                                {account.account_name}
-                              </Text>
-                            </View>
-                          </View>
-                          <Text style={styles.accountBalanceRow}>
-                            <Text style={styles.accountBalanceLabel}>
-                              Balance{' '}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.accountBalanceAmount,
-                                account.icon_color && {
-                                  color: account.icon_color,
-                                },
-                              ]}>
-                              {formatCurrency(account.balance || 0)}
-                            </Text>
-                          </Text>
-                          <Text style={styles.accountDate}>
-                            Created on{' '}
-                            {new Date(account.created_at).toLocaleDateString(
-                              'en-IN',
-                              {
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric',
-                              }
-                            )}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-              </View>
-            </>
+                        </Text>
+                      <Text style={styles.accountDate}>
+                        Created on{' '}
+                        {new Date(account.created_at).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
           ) : (
             <View style={styles.emptyAccounts}>
               <Icon name="wallet-outline" size={48} color={colors.border} />
@@ -1629,9 +1559,6 @@ const styles = StyleSheet.create({
     ...cardBase, // Apply cardBase
     overflow: 'hidden', // Keep specific overflow property
   },
-  accountsDivider: {
-    height: spacing.lg,
-  },
   accountItem: {
     position: 'relative',
     flexDirection: 'column',
@@ -1639,6 +1566,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     alignItems: 'stretch',
+  },
+  accountTypeWatermark: {
+    position: 'absolute',
+    right: 12,
+    top: '50%',
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    opacity: 0.06,
+    letterSpacing: 2,
+    transform: [{translateY: -14}],
   },
   accountRow: {
     flexDirection: 'row',

@@ -257,9 +257,7 @@ export const getAllAccounts = () => {
   try {
     const db = getDB();
     const result = db.execute(
-      `SELECT * FROM accounts
-       ORDER BY CASE WHEN account_type = 'earning' THEN 0 ELSE 1 END,
-       sort_index ASC, updated_at DESC`
+      'SELECT * FROM accounts ORDER BY sort_index ASC, updated_at DESC'
     );
     return (result.rows?._array || []).map(normalizeAccountColor);
   } catch (error) {
