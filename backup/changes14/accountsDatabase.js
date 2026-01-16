@@ -6,64 +6,6 @@ const DB_NAME = 'accountsDB.db';
 const LEGACY_RED_400 = '#F87171';
 const BROWN_400 = '#8D6E63';
 
-const migrateAccountTypeToExpenses = db => {
-  let startedTransaction = false;
-  try {
-    const schemaResult = db.execute(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'accounts'"
-    );
-    const schemaSql = schemaResult.rows?._array?.[0]?.sql || '';
-    const needsTableRebuild =
-      schemaSql.includes('account_type') && !schemaSql.includes("'expenses'");
-
-    if (needsTableRebuild) {
-      db.execute('BEGIN');
-      startedTransaction = true;
-      db.execute(`
-        CREATE TABLE accounts_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          account_name TEXT NOT NULL,
-          account_type TEXT NOT NULL CHECK(account_type IN ('earning', 'expenses')),
-          icon TEXT,
-          icon_color TEXT,
-          balance REAL DEFAULT 0,
-          is_primary INTEGER DEFAULT 0,
-          sort_index INTEGER,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-      `);
-      db.execute(
-        `INSERT INTO accounts_new (id, account_name, account_type, icon, icon_color, balance, is_primary, sort_index, created_at, updated_at)
-         SELECT id, account_name,
-                CASE
-                  WHEN account_type NOT IN ('earning', 'expenses')
-                    THEN 'expenses'
-                  ELSE account_type
-                END,
-                icon, icon_color, balance, is_primary, sort_index, created_at, updated_at
-         FROM accounts`
-      );
-      db.execute('DROP TABLE accounts');
-      db.execute('ALTER TABLE accounts_new RENAME TO accounts');
-      db.execute('COMMIT');
-      startedTransaction = false;
-    }
-
-    db.execute(
-      "UPDATE accounts SET account_type = 'expenses' WHERE account_type NOT IN ('earning', 'expenses')"
-    );
-  } catch (error) {
-    if (startedTransaction) {
-      try {
-        db.execute('ROLLBACK');
-      } catch (rollbackError) {
-        console.warn('Failed to rollback account type migration:', rollbackError);
-      }
-    }
-    console.warn('Failed to migrate account type to expenses:', error);
-  }
-};
 
 const normalizeAccountColor = account => {
   if (!account || !account.icon_color) {
@@ -94,7 +36,7 @@ export const initAccountsDatabase = () => {
       CREATE TABLE IF NOT EXISTS accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_name TEXT NOT NULL,
-        account_type TEXT NOT NULL CHECK(account_type IN ('earning', 'expenses')),
+        account_type TEXT NOT NULL CHECK(account_type IN ('earning', 'liability')),
         icon TEXT,
         icon_color TEXT,
         balance REAL DEFAULT 0,
@@ -126,7 +68,6 @@ export const initAccountsDatabase = () => {
     } catch (e) {
       // Column already exists, ignore
     }
-    migrateAccountTypeToExpenses(db);
     try {
       db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
         BROWN_400,

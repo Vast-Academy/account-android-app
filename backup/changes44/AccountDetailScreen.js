@@ -762,15 +762,15 @@ const AccountDetailScreen = ({route, navigation}) => {
     if (!latestId || txn.id !== latestId) {
       return false;
     }
-    if (isTransferTransaction(txn)) {
-      return false;
-    }
     const editCount = Number(txn.edit_count) || 0;
     if (editCount >= 3) {
       return false;
     }
     const amount = Number(txn.amount);
-    return Number.isFinite(amount);
+    if (!Number.isFinite(amount)) {
+      return false;
+    }
+    return amount < 0 && !isTransferTransaction(txn);
   };
 
   const canDeleteTransaction = txn => {
@@ -779,9 +779,6 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
     const latestId = getLatestTransactionId();
     if (!latestId || txn.id !== latestId) {
-      return false;
-    }
-    if (isTransferTransaction(txn)) {
       return false;
     }
     const amount = Number(txn.amount);
@@ -1218,7 +1215,6 @@ const AccountDetailScreen = ({route, navigation}) => {
           runningBalance = balanceAfter;
           const editCount = Number(txn.edit_count) || 0;
           const editHistory = editCount ? parseEditHistory(txn) : [];
-          const isTransfer = isTransferTransaction(txn);
 
           return (
             <View key={txn.id}>
@@ -1247,47 +1243,33 @@ const AccountDetailScreen = ({route, navigation}) => {
                       style={[
                         styles.chatIcon,
                         Number(txn.amount) < 0 && styles.chatIconDebit,
-                        isTransfer && styles.chatIconTransfer,
                       ]}>
                       <Icon
                         name={Number(txn.amount) < 0 ? 'arrow-down' : 'arrow-up'}
                         size={16}
-                        color={
-                          isTransfer
-                            ? '#3B82F6'
-                            : Number(txn.amount) < 0
-                            ? '#EF4444'
-                            : '#10B981'
-                        }
+                        color={Number(txn.amount) < 0 ? '#EF4444' : '#10B981'}
                       />
                     </View>
                     <Text
                       style={[
                         styles.chatAmount,
                         Number(txn.amount) < 0 && styles.chatAmountDebit,
-                        isTransfer && styles.chatAmountTransfer,
                       ]}>
                       {(Number(txn.amount) < 0 ? '-' : '+') +
                         formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
+                    <View style={styles.chatHeaderRight}>
+                      <Text style={styles.chatTime}>
+                        {formatTimeLabel(txn.transaction_date)}
+                      </Text>
+                      {editCount > 0 && (
+                        <Text style={styles.editedTag}>Edited</Text>
+                      )}
+                    </View>
                   </View>
                   {txn.remark ? (
                     <Text style={styles.chatRemark}>{txn.remark}</Text>
                   ) : null}
-                  <View
-                    style={[
-                      styles.chatMeta,
-                      Number(txn.amount) < 0 && styles.chatMetaDebit,
-                    ]}>
-                    <Text style={styles.chatBalance}>
-                      {formatCurrency(balanceAfter)}
-                    </Text>
-                    <View style={styles.chatMetaRight}>
-                      <Text style={styles.chatTime}>
-                        {formatTimeLabel(txn.transaction_date)}
-                      </Text>
-                    </View>
-                  </View>
                   {editHistory.length > 1 && (
                     <Text style={styles.editHistoryText}>
                       {`Edited: ${editHistory
@@ -1295,6 +1277,15 @@ const AccountDetailScreen = ({route, navigation}) => {
                         .join(' -> ')}`}
                     </Text>
                   )}
+                </View>
+                <View
+                  style={[
+                    styles.chatMeta,
+                    Number(txn.amount) < 0 && styles.chatMetaDebit,
+                  ]}>
+                  <Text style={styles.chatBalance}>
+                    {formatCurrency(balanceAfter)}
+                  </Text>
                 </View>
               </Pressable>
             </View>
@@ -1927,43 +1918,25 @@ const AccountDetailScreen = ({route, navigation}) => {
                   : 'Options'}
               </Text>
             </View>
-            <TouchableOpacity
-              style={[
-                styles.optionButton,
-                !canEditAmount(selectedTransaction) &&
-                  styles.optionButtonDisabled,
-              ]}
-              disabled={!canEditAmount(selectedTransaction)}
-              onPress={() => {
-                if (!selectedTransaction) {
-                  return;
-                }
-                closeOptionsMenu(true);
-                setEditAmount(
-                  String(Math.abs(Number(selectedTransaction.amount) || 0))
-                );
-                setEditAmountVisible(true);
-              }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="create-outline"
-                  size={20}
-                  color={
-                    canEditAmount(selectedTransaction)
-                      ? colors.text.primary
-                      : colors.text.light
+            {canEditAmount(selectedTransaction) && (
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={() => {
+                  if (!selectedTransaction) {
+                    return;
                   }
-                />
-                <Text
-                  style={[
-                    styles.optionText,
-                    !canEditAmount(selectedTransaction) &&
-                      styles.optionTextDisabled,
-                  ]}>
-                  Edit Amount
-                </Text>
-              </View>
-            </TouchableOpacity>
+                  closeOptionsMenu(true);
+                  setEditAmount(
+                    String(Math.abs(Number(selectedTransaction.amount) || 0))
+                  );
+                  setEditAmountVisible(true);
+                }}>
+                <View style={styles.optionItemRow}>
+                  <Icon name="create-outline" size={20} color={colors.text.primary} />
+                  <Text style={styles.optionText}>Edit Amount</Text>
+                </View>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.optionButton}
               onPress={() => {
@@ -3038,9 +3011,6 @@ const styles = StyleSheet.create({
   chatIconDebit: {
     backgroundColor: '#FEE2E2',
   },
-  chatIconTransfer: {
-    backgroundColor: 'rgba(59, 130, 246, 0.16)',
-  },
   chatAmount: {
     fontSize: fontSize.large,
     fontWeight: fontWeight.bold,
@@ -3049,9 +3019,6 @@ const styles = StyleSheet.create({
   },
   chatAmountDebit: {
     color: '#EF4444',
-  },
-  chatAmountTransfer: {
-    color: '#3B82F6',
   },
   chatTime: {
     fontSize: fontSize.small,
@@ -3075,21 +3042,14 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   chatMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
+    alignItems: 'flex-end',
+    gap: 6,
   },
   chatMetaDebit: {
     alignItems: 'flex-start',
   },
-  chatMetaRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   chatBalance: {
+    marginTop: 6,
     fontSize: fontSize.small,
     color: colors.text.secondary,
   },

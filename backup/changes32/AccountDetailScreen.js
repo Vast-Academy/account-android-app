@@ -207,16 +207,18 @@ const AccountDetailScreen = ({route, navigation}) => {
   }, [withdrawPulse, transferPulse, defaultPulse]);
 
   const runModeHighlightSequence = useCallback(() => {
+    const pulseUpMs = 250;
+    const pulseDownMs = 250;
     const pulseOnce = target =>
       Animated.sequence([
         Animated.timing(target, {
           toValue: 1,
-          duration: 180,
+          duration: pulseUpMs,
           useNativeDriver: false,
         }),
         Animated.timing(target, {
           toValue: 0,
-          duration: 180,
+          duration: pulseDownMs,
           useNativeDriver: false,
         }),
       ]);
@@ -236,27 +238,20 @@ const AccountDetailScreen = ({route, navigation}) => {
   }, [clearPulseAnimation, withdrawPulse, transferPulse]);
 
   const runDefaultHighlight = useCallback(() => {
-    const pulseUpMs = 300;
-    const pulseDownMs = 300;
-    const pulses = 5;
-    const steps = [];
-    for (let i = 0; i < pulses; i += 1) {
-      steps.push(
-        Animated.timing(defaultPulse, {
-          toValue: 1,
-          duration: pulseUpMs,
-          useNativeDriver: false,
-        })
-      );
-      steps.push(
-        Animated.timing(defaultPulse, {
-          toValue: 0,
-          duration: pulseDownMs,
-          useNativeDriver: false,
-        })
-      );
-    }
-    Animated.sequence(steps).start();
+    const pulseUpMs = 750;
+    const pulseDownMs = 750;
+    Animated.sequence([
+      Animated.timing(defaultPulse, {
+        toValue: 1,
+        duration: pulseUpMs,
+        useNativeDriver: false,
+      }),
+      Animated.timing(defaultPulse, {
+        toValue: 0,
+        duration: pulseDownMs,
+        useNativeDriver: false,
+      }),
+    ]).start();
   }, [defaultPulse]);
   const loadTransactions = useCallback(() => {
     if (!account.id) {
@@ -532,7 +527,7 @@ const AccountDetailScreen = ({route, navigation}) => {
   const handleAddEntry = async () => {
     // Validation
     if (!amount || parseFloat(amount) <= 0) {
-      showToast('Please enter a valid amount.', 'error');
+      Alert.alert('Error', 'Please enter a valid amount');
       return false;
     }
 
@@ -582,7 +577,7 @@ const AccountDetailScreen = ({route, navigation}) => {
 
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-      showToast('Please enter a valid amount.', 'error');
+      Alert.alert('Error', 'Please enter a valid amount');
       return false;
     }
 
@@ -617,7 +612,7 @@ const AccountDetailScreen = ({route, navigation}) => {
       return false;
     }
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-      showToast('Please enter a valid amount.', 'error');
+      Alert.alert('Error', 'Please enter a valid amount');
       return false;
     }
 
@@ -729,64 +724,18 @@ const AccountDetailScreen = ({route, navigation}) => {
     return Number.isFinite(amount);
   };
 
-  const parseEditHistory = txn => {
-    if (!txn?.edit_history) {
-      return [];
-    }
-    try {
-      const parsed = JSON.parse(txn.edit_history);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-      return [];
-    }
-  };
-
-  const getLatestTransactionId = () => {
-    if (!transactions || transactions.length === 0) {
-      return null;
-    }
-    let latest = transactions[0];
-    for (let i = 1; i < transactions.length; i += 1) {
-      if (transactions[i].transaction_date > latest.transaction_date) {
-        latest = transactions[i];
-      }
-    }
-    return latest?.id ?? null;
-  };
-
   const canEditAmount = txn => {
     if (!txn) {
       return false;
     }
-    const latestId = getLatestTransactionId();
-    if (!latestId || txn.id !== latestId) {
-      return false;
-    }
-    if (isTransferTransaction(txn)) {
-      return false;
-    }
-    const editCount = Number(txn.edit_count) || 0;
-    if (editCount >= 3) {
-      return false;
-    }
     const amount = Number(txn.amount);
-    return Number.isFinite(amount);
+    if (!Number.isFinite(amount)) {
+      return false;
+    }
+    return amount < 0 && !isTransferTransaction(txn);
   };
 
-  const canDeleteTransaction = txn => {
-    if (!txn) {
-      return false;
-    }
-    const latestId = getLatestTransactionId();
-    if (!latestId || txn.id !== latestId) {
-      return false;
-    }
-    if (isTransferTransaction(txn)) {
-      return false;
-    }
-    const amount = Number(txn.amount);
-    return Number.isFinite(amount);
-  };
+  const canDeleteTransaction = txn => canEditAmount(txn);
 
   const openTransactionMenu = txn => {
     setSelectedTransaction(txn);
@@ -797,46 +746,17 @@ const AccountDetailScreen = ({route, navigation}) => {
     if (!selectedTransaction) {
       return;
     }
-    const parsedAmount = parseFloat(
-      String(editAmount).replace(/[^0-9.]/g, '')
-    );
-    if (!parsedAmount || parsedAmount <= 0) {
-      showToast('Please enter a valid amount.', 'error');
+    if (!editAmount || parseFloat(editAmount) <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
       return;
-    }
-    const editCount = Number(selectedTransaction.edit_count) || 0;
-    if (editCount >= 3) {
-      showToast('Edit limit reached.', 'error');
-      return;
-    }
-    if (Number(selectedTransaction.amount) < 0) {
-      const currentAbs = Math.abs(Number(selectedTransaction.amount) || 0);
-      const availableBalance = totalBalance + currentAbs;
-      if (parsedAmount > availableBalance) {
-        showToast('Balance is low. Add amount first to withdraw.', 'error');
-        return;
-      }
     }
     setLoading(true);
     try {
-      const nextAmount =
-        Number(selectedTransaction.amount) < 0 ? -parsedAmount : parsedAmount;
-      const currentHistory = parseEditHistory(selectedTransaction);
-      const originalAbs = Math.abs(Number(selectedTransaction.amount) || 0);
-      const nextAbs = Math.abs(nextAmount);
-      const nextHistory =
-        currentHistory.length > 0
-          ? [...currentHistory, nextAbs]
-          : [originalAbs, nextAbs];
       await updateTransactionAmount(
         selectedTransaction.id,
         account.id,
-        nextAmount,
-        JSON.stringify(nextHistory),
-        editCount + 1
+        parseFloat(editAmount)
       );
-      const remainingEdits = Math.max(0, 2 - editCount);
-      showToast(`${remainingEdits} edits remaining.`, 'success');
       setEditAmountVisible(false);
       setSelectedTransaction(null);
       setEditAmount('');
@@ -1216,9 +1136,6 @@ const AccountDetailScreen = ({route, navigation}) => {
 
           const balanceAfter = runningBalance + (Number(txn.amount) || 0);
           runningBalance = balanceAfter;
-          const editCount = Number(txn.edit_count) || 0;
-          const editHistory = editCount ? parseEditHistory(txn) : [];
-          const isTransfer = isTransferTransaction(txn);
 
           return (
             <View key={txn.id}>
@@ -1247,54 +1164,39 @@ const AccountDetailScreen = ({route, navigation}) => {
                       style={[
                         styles.chatIcon,
                         Number(txn.amount) < 0 && styles.chatIconDebit,
-                        isTransfer && styles.chatIconTransfer,
                       ]}>
                       <Icon
                         name={Number(txn.amount) < 0 ? 'arrow-down' : 'arrow-up'}
                         size={16}
-                        color={
-                          isTransfer
-                            ? '#3B82F6'
-                            : Number(txn.amount) < 0
-                            ? '#EF4444'
-                            : '#10B981'
-                        }
+                        color={Number(txn.amount) < 0 ? '#EF4444' : '#10B981'}
                       />
                     </View>
                     <Text
                       style={[
                         styles.chatAmount,
                         Number(txn.amount) < 0 && styles.chatAmountDebit,
-                        isTransfer && styles.chatAmountTransfer,
                       ]}>
                       {(Number(txn.amount) < 0 ? '-' : '+') +
                         formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
-                  </View>
-                  {txn.remark ? (
-                    <Text style={styles.chatRemark}>{txn.remark}</Text>
-                  ) : null}
-                  <View
-                    style={[
-                      styles.chatMeta,
-                      Number(txn.amount) < 0 && styles.chatMetaDebit,
-                    ]}>
-                    <Text style={styles.chatBalance}>
-                      {formatCurrency(balanceAfter)}
-                    </Text>
-                    <View style={styles.chatMetaRight}>
+                    <View style={styles.chatHeaderRight}>
                       <Text style={styles.chatTime}>
                         {formatTimeLabel(txn.transaction_date)}
                       </Text>
                     </View>
                   </View>
-                  {editHistory.length > 1 && (
-                    <Text style={styles.editHistoryText}>
-                      {`Edited: ${editHistory
-                        .map(value => formatCurrency(Number(value) || 0))
-                        .join(' -> ')}`}
-                    </Text>
-                  )}
+                  {txn.remark ? (
+                    <Text style={styles.chatRemark}>{txn.remark}</Text>
+                  ) : null}
+                </View>
+                <View
+                  style={[
+                    styles.chatMeta,
+                    Number(txn.amount) < 0 && styles.chatMetaDebit,
+                  ]}>
+                  <Text style={styles.chatBalance}>
+                    {formatCurrency(balanceAfter)}
+                  </Text>
                 </View>
               </Pressable>
             </View>
@@ -1698,7 +1600,15 @@ const AccountDetailScreen = ({route, navigation}) => {
               {withdrawMode &&
                 withdrawMode !== withdrawDefaultMode && (
                   <AnimatedTouchableOpacity
-                    style={styles.setDefaultButton}
+                    style={[
+                      styles.setDefaultButton,
+                      {
+                        backgroundColor: defaultPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['rgba(16, 185, 129, 0)', 'rgba(16, 185, 129, 0.12)'],
+                        }),
+                      },
+                    ]}
                     onPress={() => {
                       const message =
                         withdrawMode === 'withdraw'
@@ -1713,18 +1623,7 @@ const AccountDetailScreen = ({route, navigation}) => {
                           console.error('Failed to save withdraw default mode:', error);
                         });
                     }}>
-                    <Animated.View
-                      style={[
-                        styles.setDefaultGlow,
-                        {
-                          backgroundColor: defaultPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ['rgba(16, 185, 129, 0)', 'rgba(16, 185, 129, 0.14)'],
-                          }),
-                        },
-                      ]}>
-                      <Text style={styles.setDefaultText}>Set as default</Text>
-                    </Animated.View>
+                    <Text style={styles.setDefaultText}>Set as default</Text>
                   </AnimatedTouchableOpacity>
                 )}
               <Text style={styles.modalTitle}>
@@ -1859,11 +1758,18 @@ const AccountDetailScreen = ({route, navigation}) => {
                 ]}
                 onPress={async () => {
                   if (!withdrawMode) {
-                    showToast(
-                      'You need to select one of the options above.',
-                      'error'
-                    );
-                    runModeHighlightSequence();
+                    if (withdrawAmount.trim()) {
+                      showToast(
+                        'You need to select one of the options above.',
+                        'error'
+                      );
+                      runModeHighlightSequence();
+                    } else {
+                      Alert.alert(
+                        'Select Option',
+                        'Please select Withdraw or Transfer first.'
+                      );
+                    }
                     return;
                   }
                   if (withdrawMode === 'transfer') {
@@ -1927,43 +1833,23 @@ const AccountDetailScreen = ({route, navigation}) => {
                   : 'Options'}
               </Text>
             </View>
-            <TouchableOpacity
-              style={[
-                styles.optionButton,
-                !canEditAmount(selectedTransaction) &&
-                  styles.optionButtonDisabled,
-              ]}
-              disabled={!canEditAmount(selectedTransaction)}
-              onPress={() => {
-                if (!selectedTransaction) {
-                  return;
-                }
-                closeOptionsMenu(true);
-                setEditAmount(
-                  String(Math.abs(Number(selectedTransaction.amount) || 0))
-                );
-                setEditAmountVisible(true);
-              }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="create-outline"
-                  size={20}
-                  color={
-                    canEditAmount(selectedTransaction)
-                      ? colors.text.primary
-                      : colors.text.light
+            {canEditAmount(selectedTransaction) && (
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={() => {
+                  if (!selectedTransaction) {
+                    return;
                   }
-                />
-                <Text
-                  style={[
-                    styles.optionText,
-                    !canEditAmount(selectedTransaction) &&
-                      styles.optionTextDisabled,
-                  ]}>
-                  Edit Amount
-                </Text>
-              </View>
-            </TouchableOpacity>
+                  closeOptionsMenu(true);
+                  setEditAmount(String(selectedTransaction.amount ?? ''));
+                  setEditAmountVisible(true);
+                }}>
+                <View style={styles.optionItemRow}>
+                  <Icon name="create-outline" size={20} color={colors.text.primary} />
+                  <Text style={styles.optionText}>Edit Amount</Text>
+                </View>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.optionButton}
               onPress={() => {
@@ -1986,68 +1872,31 @@ const AccountDetailScreen = ({route, navigation}) => {
                 <Text style={styles.optionText}>Edit Remark</Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.optionButton,
-                styles.optionDelete,
-                !canDeleteTransaction(selectedTransaction) &&
-                  styles.optionButtonDisabled,
-              ]}
-              disabled={!canDeleteTransaction(selectedTransaction)}
-              onPress={() => {
-                if (!selectedTransaction) {
-                  return;
-                }
-                Alert.alert(
-                  'Delete Entry',
-                  'Are you sure you want to delete this entry?',
-                  [
-                    {text: 'Cancel', style: 'cancel'},
-                    {
-                      text: 'Delete',
-                      style: 'destructive',
-                      onPress: async () => {
-                        closeOptionsMenu(true);
-                        try {
-                          await deleteTransaction(
-                            selectedTransaction.id,
-                            account.id
-                          );
-                          loadTransactions();
-                          setSelectedTransaction(null);
-                        } catch (error) {
-                          console.error('Failed to delete entry:', error);
-                          Alert.alert(
-                            'Error',
-                            'Failed to delete entry. Please try again.'
-                          );
-                        }
-                      },
-                    },
-                  ]
-                );
-              }}>
-              <View style={styles.optionItemRow}>
-                <Icon
-                  name="trash-outline"
-                  size={20}
-                  color={
-                    canDeleteTransaction(selectedTransaction)
-                      ? '#B91C1C'
-                      : colors.text.light
+            {canDeleteTransaction(selectedTransaction) && (
+              <TouchableOpacity
+                style={[styles.optionButton, styles.optionDelete]}
+                onPress={async () => {
+                  if (!selectedTransaction) {
+                    return;
                   }
-                />
-                <Text
-                  style={[
-                    styles.optionText,
-                    styles.optionDeleteText,
-                    !canDeleteTransaction(selectedTransaction) &&
-                      styles.optionTextDisabled,
-                  ]}>
-                  Delete Entry
-                </Text>
-              </View>
-            </TouchableOpacity>
+                  closeOptionsMenu(true);
+                  try {
+                    await deleteTransaction(selectedTransaction.id, account.id);
+                    loadTransactions();
+                    setSelectedTransaction(null);
+                  } catch (error) {
+                    console.error('Failed to delete entry:', error);
+                    Alert.alert('Error', 'Failed to delete entry. Please try again.');
+                  }
+                }}>
+                <View style={styles.optionItemRow}>
+                  <Icon name="trash-outline" size={20} color="#B91C1C" />
+                  <Text style={[styles.optionText, styles.optionDeleteText]}>
+                    Delete Entry
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.optionButton, styles.optionButtonCancel]}
               onPress={closeOptionsMenu}>
@@ -2656,12 +2505,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 6,
   },
-  setDefaultGlow: {
-    alignSelf: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
   setDefaultText: {
     fontSize: fontSize.small,
     fontWeight: fontWeight.semibold,
@@ -2862,9 +2705,6 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.medium,
     color: colors.text.primary,
   },
-  optionTextDisabled: {
-    color: colors.text.light,
-  },
   optionTextSelected: {
     color: '#10B981',
     fontWeight: fontWeight.semibold,
@@ -2874,9 +2714,6 @@ const styles = StyleSheet.create({
   },
   optionDeleteText: {
     color: '#B91C1C',
-  },
-  optionButtonDisabled: {
-    opacity: 0.6,
   },
   optionButtonCancel: {
     borderTopWidth: 1,
@@ -3038,9 +2875,6 @@ const styles = StyleSheet.create({
   chatIconDebit: {
     backgroundColor: '#FEE2E2',
   },
-  chatIconTransfer: {
-    backgroundColor: 'rgba(59, 130, 246, 0.16)',
-  },
   chatAmount: {
     fontSize: fontSize.large,
     fontWeight: fontWeight.bold,
@@ -3050,46 +2884,23 @@ const styles = StyleSheet.create({
   chatAmountDebit: {
     color: '#EF4444',
   },
-  chatAmountTransfer: {
-    color: '#3B82F6',
-  },
   chatTime: {
     fontSize: fontSize.small,
     color: colors.text.secondary,
-  },
-  editedTag: {
-    marginLeft: 8,
-    fontSize: fontSize.small,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.secondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
   },
   chatRemark: {
     fontSize: fontSize.medium,
     color: colors.text.primary,
   },
-  editHistoryText: {
-    marginTop: 4,
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-  },
   chatMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
+    alignItems: 'flex-end',
+    gap: 6,
   },
   chatMetaDebit: {
     alignItems: 'flex-start',
   },
-  chatMetaRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   chatBalance: {
+    marginTop: 6,
     fontSize: fontSize.small,
     color: colors.text.secondary,
   },

@@ -1081,7 +1081,8 @@ const DashboardScreen = ({route, navigation}) => {
                               styles.accountBalanceAmount,
                               account.icon_color && {color: account.icon_color},
                             ]}>
-                            {formatCurrency(account.balance || 0)}
+                            {(account.account_type === 'earning' ? '+' : '-') +
+                              formatCurrency(account.balance || 0)}
                           </Text>
                         </Text>
                       <Text style={styles.accountDate}>

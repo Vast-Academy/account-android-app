@@ -1286,6 +1286,9 @@ const AccountDetailScreen = ({route, navigation}) => {
                       <Text style={styles.chatTime}>
                         {formatTimeLabel(txn.transaction_date)}
                       </Text>
+                      {editCount > 0 && (
+                        <Text style={styles.editedTag}>Edited</Text>
+                      )}
                     </View>
                   </View>
                   {editHistory.length > 1 && (

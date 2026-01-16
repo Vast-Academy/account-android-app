@@ -139,7 +139,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
         setIsPrimary(true);
       } else {
         setIsFirstTime(false);
-        setAccountType('expenses');
+        setAccountType('liability');
         setIsPrimary(false);
       }
     } catch (error) {
@@ -151,7 +151,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
   };
 
   const handleAccountTypeChange = newType => {
-    if (isFirstTime && newType === 'expenses') {
+    if (isFirstTime && newType === 'liability') {
       Alert.alert(
         'Not Available',
         'Your first account must be an Earning Account.',
@@ -166,7 +166,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
       return;
     }
     setAccountType(newType);
-    if (newType === 'expenses') {
+    if (newType === 'liability') {
       setIsPrimary(false);
     }
   };
@@ -297,19 +297,19 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                     <TouchableOpacity
                       style={[
                         styles.segmentButton,
-                        accountType === 'expenses' && styles.segmentButtonActive,
+                        accountType === 'liability' && styles.segmentButtonActive,
                         isFirstTime && styles.segmentButtonDisabled,
                       ]}
-                      onPress={() => handleAccountTypeChange('expenses')}
+                      onPress={() => handleAccountTypeChange('liability')}
                       disabled={loading || isFirstTime}>
                       <Text
                         style={[
                           styles.segmentButtonText,
-                          accountType === 'expenses' &&
+                          accountType === 'liability' &&
                             styles.segmentButtonTextActive,
                           isFirstTime && styles.segmentButtonTextDisabled,
                         ]}>
-                        Expenses
+                        Liability
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -318,7 +318,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                 <View
                   style={[
                     styles.primaryRow,
-                    accountType === 'expenses' && styles.primaryRowDisabled,
+                    accountType === 'liability' && styles.primaryRowDisabled,
                   ]}>
                   <TouchableOpacity
                     style={[
@@ -326,10 +326,10 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                       isPrimary
                         ? styles.primaryToggleActive
                         : styles.primaryToggleInactive,
-                      accountType === 'expenses' && styles.primaryToggleDisabled,
+                      accountType === 'liability' && styles.primaryToggleDisabled,
                     ]}
                     onPress={() => setIsPrimary(prev => !prev)}
-                    disabled={loading || accountType === 'expenses'}>
+                    disabled={loading || accountType === 'liability'}>
                     <View
                       style={[
                         styles.primaryKnob,
@@ -340,7 +340,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                   <Text
                     style={[
                       styles.primaryText,
-                      accountType === 'expenses' && styles.primaryTextDisabled,
+                      accountType === 'liability' && styles.primaryTextDisabled,
                     ]}>
                     Set as Primary Account
                   </Text>

@@ -309,7 +309,7 @@ const AddAccountModal = ({visible, onClose, onSuccess}) => {
                             styles.segmentButtonTextActive,
                           isFirstTime && styles.segmentButtonTextDisabled,
                         ]}>
-                        Expenses
+                        expenses
                       </Text>
                     </TouchableOpacity>
                   </View>

@@ -24,24 +24,11 @@ export const initTransactionsDatabase = () => {
         account_id INTEGER NOT NULL,
         amount REAL NOT NULL,
         remark TEXT,
-        edit_history TEXT,
-        edit_count INTEGER DEFAULT 0,
         transaction_date INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
         FOREIGN KEY (account_id) REFERENCES accounts (id)
       );
     `);
-
-    try {
-      db.execute('ALTER TABLE transactions ADD COLUMN edit_history TEXT');
-    } catch (e) {
-      // Column already exists, ignore
-    }
-    try {
-      db.execute('ALTER TABLE transactions ADD COLUMN edit_count INTEGER DEFAULT 0');
-    } catch (e) {
-      // Column already exists, ignore
-    }
 
     console.log('Transactions database initialized successfully');
   } catch (error) {
@@ -179,31 +166,13 @@ export const deleteTransactionsByAccount = async (accountId) => {
 };
 
 // Update transaction amount
-export const updateTransactionAmount = async (
-  transactionId,
-  accountId,
-  amount,
-  editHistory = null,
-  editCount = null
-) => {
+export const updateTransactionAmount = async (transactionId, accountId, amount) => {
   try {
     const db = getDB();
-    if (editHistory !== null || editCount !== null) {
-      db.execute(
-        'UPDATE transactions SET amount = ?, edit_history = ?, edit_count = ? WHERE id = ?',
-        [
-          amount,
-          editHistory,
-          Number.isFinite(editCount) ? editCount : 0,
-          transactionId,
-        ]
-      );
-    } else {
-      db.execute('UPDATE transactions SET amount = ? WHERE id = ?', [
-        amount,
-        transactionId,
-      ]);
-    }
+    db.execute('UPDATE transactions SET amount = ? WHERE id = ?', [
+      amount,
+      transactionId,
+    ]);
 
     await updateAccountBalance(accountId);
 

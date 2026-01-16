@@ -1270,24 +1270,18 @@ const AccountDetailScreen = ({route, navigation}) => {
                       {(Number(txn.amount) < 0 ? '-' : '+') +
                         formatCurrency(Math.abs(Number(txn.amount) || 0))}
                     </Text>
+                    <View style={styles.chatHeaderRight}>
+                      <Text style={styles.chatTime}>
+                        {formatTimeLabel(txn.transaction_date)}
+                      </Text>
+                      {editCount > 0 && (
+                        <Text style={styles.editedTag}>Edited</Text>
+                      )}
+                    </View>
                   </View>
                   {txn.remark ? (
                     <Text style={styles.chatRemark}>{txn.remark}</Text>
                   ) : null}
-                  <View
-                    style={[
-                      styles.chatMeta,
-                      Number(txn.amount) < 0 && styles.chatMetaDebit,
-                    ]}>
-                    <Text style={styles.chatBalance}>
-                      {formatCurrency(balanceAfter)}
-                    </Text>
-                    <View style={styles.chatMetaRight}>
-                      <Text style={styles.chatTime}>
-                        {formatTimeLabel(txn.transaction_date)}
-                      </Text>
-                    </View>
-                  </View>
                   {editHistory.length > 1 && (
                     <Text style={styles.editHistoryText}>
                       {`Edited: ${editHistory
@@ -1295,6 +1289,15 @@ const AccountDetailScreen = ({route, navigation}) => {
                         .join(' -> ')}`}
                     </Text>
                   )}
+                </View>
+                <View
+                  style={[
+                    styles.chatMeta,
+                    Number(txn.amount) < 0 && styles.chatMetaDebit,
+                  ]}>
+                  <Text style={styles.chatBalance}>
+                    {formatCurrency(balanceAfter)}
+                  </Text>
                 </View>
               </Pressable>
             </View>
@@ -3075,21 +3078,14 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   chatMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
+    alignItems: 'flex-end',
+    gap: 6,
   },
   chatMetaDebit: {
     alignItems: 'flex-start',
   },
-  chatMetaRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   chatBalance: {
+    marginTop: 6,
     fontSize: fontSize.small,
     color: colors.text.secondary,
   },

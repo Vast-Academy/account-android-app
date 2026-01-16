@@ -885,10 +885,15 @@ const DashboardScreen = ({route, navigation}) => {
                     if (account.account_type === 'earning') {
                       navigation.navigate('AccountDetail', {account});
                     } else {
-                      navigation.navigate('LiabilityAccountDetail', {account});
+                      navigation.navigate('ExpensesAccountDetail', {account});
                     }
                   }}
                   onLongPress={() => openContextMenu(account)}>
+                  <Text
+                    pointerEvents="none"
+                    style={styles.accountTypeWatermark}>
+                    {account.account_type === 'earning' ? 'EARNING' : 'EXPENSES'}
+                  </Text>
                   <View style={styles.badgeContainer}>
                     {pinnedAccountIds.includes(String(account.id)) && (
                       <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
@@ -1464,15 +1469,16 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     alignItems: 'stretch',
   },
-  earningWatermark: {
+  accountTypeWatermark: {
     position: 'absolute',
     right: 12,
     top: '50%',
-    fontSize: 42,
+    fontSize: 28,
     fontWeight: 'bold',
-    opacity: 0.05,
+    color: colors.text.primary,
+    opacity: 0.06,
     letterSpacing: 2,
-    transform: [{translateY: -21}],
+    transform: [{translateY: -14}],
   },
   accountRow: {
     flexDirection: 'row',

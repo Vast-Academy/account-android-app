@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Modal,
   Platform,
+  ToastAndroid,
   Alert,
   LayoutAnimation,
   UIManager,
@@ -16,18 +17,17 @@ import {
   InteractionManager,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import FaArrowCircleDown from '../components/icons/FaArrowCircleDown';
 import BsCashCoin from '../components/icons/BsCashCoin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import AddAccountModal from '../components/AddAccountModal';
 import FaArrowCircleUp from '../components/icons/FaArrowCircleUp';
-import BottomSheet from '../components/BottomSheet';
 import {
   initAccountsDatabase,
   getAllAccounts,
   renameAccount,
   deleteAccountAndTransactions,
-  updateAccountSortIndex,
 } from '../services/accountsDatabase';
 import {
   initTransactionsDatabase,
@@ -36,7 +36,6 @@ import {
 } from '../services/transactionsDatabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useToast} from '../hooks/useToast';
-import {useFocusEffect} from '@react-navigation/native';
 
 // Quick Period Options
 const QUICK_PERIODS = [
@@ -89,7 +88,7 @@ const renderAccountIcon = (iconName, size, color) => {
 };
 
 const DashboardScreen = ({route, navigation}) => {
-  const {user} = route.params || {};
+  const {user, showTutorial} = route.params || {};
   const userNameRaw =
     user?.displayName ||
     user?.name ||
@@ -101,8 +100,9 @@ const DashboardScreen = ({route, navigation}) => {
   const [quickPeriod, setQuickPeriod] = useState('1month');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
-  const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
-  const [bottomSheetContent, setBottomSheetContent] = useState(null);
+  const [showQuickDropdown, setShowQuickDropdown] = useState(false);
+  const [showMonthDropdown, setShowMonthDropdown] = useState(false);
+  const [showYearDropdown, setShowYearDropdown] = useState(false);
 
   // Available years (will be populated from transactions)
   const [availableYears, setAvailableYears] = useState([]);
@@ -115,7 +115,8 @@ const DashboardScreen = ({route, navigation}) => {
   // Other states
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [accounts, setAccounts] = useState([]);
-  const [isAccountsLoaded, setIsAccountsLoaded] = useState(false);
+  const [pinnedAccountIds, setPinnedAccountIds] = useState([]);
+  const [accountOrderIds, setAccountOrderIds] = useState([]);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -124,21 +125,10 @@ const DashboardScreen = ({route, navigation}) => {
   const [fabLayout, setFabLayout] = useState(null);
   const {showToast} = useToast();
 
-   // Setup completion popup states
-   const [showSetupPopup, setShowSetupPopup] = useState(false);
-   const [popupDismissedThisSession, setPopupDismissedThisSession] = useState(false);
-
   const fabRef = useRef(null);
 
-  const netBalance = React.useMemo(() => {
-    return accounts.reduce((total, account) => {
-      const balance = Number(account?.balance) || 0;
-      return total + balance;
-    }, 0);
-  }, [accounts]);
-
   const showTutorialStep1 =
-    isAccountsLoaded && accounts.length === 0 && !showAddAccountModal;
+    Boolean(showTutorial) && accounts.length === 0 && !showAddAccountModal;
 
   const handleAddAccountPress = () => {
     setShowAddAccountModal(true);
@@ -208,18 +198,6 @@ const DashboardScreen = ({route, navigation}) => {
     };
   }, [fabLayout]);
 
-  const selectedAccountIndex = React.useMemo(() => {
-    if (!selectedAccount) {
-      return -1;
-    }
-    return accounts.findIndex(
-      account => String(account.id) === String(selectedAccount.id)
-    );
-  }, [accounts, selectedAccount]);
-  const isMoveUpDisabled = selectedAccountIndex <= 0;
-  const isMoveDownDisabled =
-    selectedAccountIndex < 0 || selectedAccountIndex >= accounts.length - 1;
-
   // Animation values
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const contentTranslateY = useRef(new Animated.Value(300)).current;
@@ -230,6 +208,7 @@ const DashboardScreen = ({route, navigation}) => {
       initAccountsDatabase();
       initTransactionsDatabase();
       loadMonthStartDay();
+      loadPinnedAccounts();
       loadAccounts();
     } catch (error) {
       console.error('Failed to initialize accounts database:', error);
@@ -279,35 +258,29 @@ const DashboardScreen = ({route, navigation}) => {
     generateAvailableYears();
   }, [accounts]);
 
-  // Check setup completion status on screen focus
-  useFocusEffect(
-    React.useCallback(() => {
-      const checkSetupStatus = async () => {
-        try {
-          const storedUser = await AsyncStorage.getItem('user');
-          if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            if (!userData.setupComplete && !popupDismissedThisSession) {
-              setShowSetupPopup(true);
-            }
-          }
-        } catch (error) {
-          console.error('Error checking setup status:', error);
-        }
-      };
+  useEffect(() => {
+    if (accountOrderIds.length === 0) {
+      return;
+    }
+    runPinReorderAnimation();
+    setAccounts(current =>
+      sortAccountsByPinned(current, pinnedAccountIds, accountOrderIds)
+    );
+  }, [pinnedAccountIds, accountOrderIds]);
 
-      checkSetupStatus();
-    }, [popupDismissedThisSession])
-  );
-
-  const handleGoToProfile = () => {
-    setShowSetupPopup(false);
-    navigation.navigate('More');
-  };
-
-  const handleRemindLater = () => {
-    setShowSetupPopup(false);
-    setPopupDismissedThisSession(true);
+  const loadPinnedAccounts = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('pinnedAccountIds');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const normalized = Array.isArray(parsed)
+          ? parsed.map(id => String(id))
+          : [];
+        setPinnedAccountIds(normalized);
+      }
+    } catch (error) {
+      console.error('Failed to load pinned accounts:', error);
+    }
   };
 
   const normalizeMonthStartDay = value => {
@@ -352,6 +325,58 @@ const DashboardScreen = ({route, navigation}) => {
     return {startTime: start.getTime(), endTime: end.getTime()};
   };
 
+  const sortAccountsByPinned = (accountsList, pinnedIds, orderIds) => {
+    if (!accountsList || accountsList.length === 0) {
+      return [];
+    }
+    if (!pinnedIds || pinnedIds.length === 0) {
+      if (!orderIds || orderIds.length === 0) {
+        return accountsList;
+      }
+      const orderMap = new Map();
+      orderIds.forEach((id, index) => {
+        orderMap.set(String(id), index);
+      });
+      return [...accountsList].sort(
+        (first, second) =>
+          (orderMap.get(String(first.id)) ?? 0) -
+          (orderMap.get(String(second.id)) ?? 0)
+      );
+    }
+    const pinnedOrder = new Map();
+    pinnedIds.forEach((id, index) => {
+      pinnedOrder.set(String(id), index);
+    });
+    const orderMap = new Map();
+    if (orderIds && orderIds.length > 0) {
+      orderIds.forEach((id, index) => {
+        orderMap.set(String(id), index);
+      });
+    }
+    const pinned = [];
+    const unpinned = [];
+    accountsList.forEach(account => {
+      const accountId = String(account.id);
+      if (pinnedOrder.has(accountId)) {
+        pinned.push(account);
+      } else {
+        unpinned.push(account);
+      }
+    });
+    pinned.sort(
+      (first, second) =>
+        pinnedOrder.get(String(first.id)) - pinnedOrder.get(String(second.id))
+    );
+    if (orderMap.size > 0) {
+      unpinned.sort(
+        (first, second) =>
+          (orderMap.get(String(first.id)) ?? 0) -
+          (orderMap.get(String(second.id)) ?? 0)
+      );
+    }
+    return [...pinned, ...unpinned];
+  };
+
   // Load accounts from database with updated balances
   const loadAccounts = () => {
     try {
@@ -367,12 +392,18 @@ const DashboardScreen = ({route, navigation}) => {
       });
 
       console.log('Loaded accounts with balances:', accountsWithBalance);
-      setAccounts(accountsWithBalance);
+      const orderIds = accountsList.map(account => String(account.id));
+      setAccountOrderIds(orderIds);
+      setAccounts(
+        sortAccountsByPinned(
+          accountsWithBalance,
+          pinnedAccountIds,
+          orderIds
+        )
+      );
       // Note: Filtered earning/withdrawal data will be calculated by updateFilteredData()
     } catch (error) {
       console.error('Failed to load accounts:', error);
-    } finally {
-      setIsAccountsLoaded(true);
     }
   };
 
@@ -410,17 +441,6 @@ const DashboardScreen = ({route, navigation}) => {
       console.error('Failed to generate years:', error);
       setAvailableYears([new Date().getFullYear()]);
     }
-  };
-
-  const isTransferTransaction = txn => {
-    const remark = String(txn?.remark || '').trim().toLowerCase();
-    return (
-      remark.startsWith('transferred to ') ||
-      remark.startsWith('transferred from ') ||
-      remark.startsWith('requested to ') ||
-      remark.startsWith('requested from ') ||
-      remark.startsWith('requested by ')
-    );
   };
 
   // Calculate data for Quick Period
@@ -492,13 +512,10 @@ const DashboardScreen = ({route, navigation}) => {
           ) {
             recordCount++;
             const amount = Number(txn.amount) || 0;
-            const isTransfer = isTransferTransaction(txn);
-            if (isTransfer) {
-              return;
-            }
             if (amount > 0 && account.account_type === 'earning') {
               earning += amount;
-            } else if (amount < 0) {
+            }
+            if (amount < 0) {
               withdrawals += Math.abs(amount);
             }
           }
@@ -543,13 +560,10 @@ const DashboardScreen = ({route, navigation}) => {
           ) {
             recordCount++;
             const amount = Number(txn.amount) || 0;
-            const isTransfer = isTransferTransaction(txn);
-            if (isTransfer) {
-              return;
-            }
             if (amount > 0 && account.account_type === 'earning') {
               earning += amount;
-            } else if (amount < 0) {
+            }
+            if (amount < 0) {
               withdrawals += Math.abs(amount);
             }
           }
@@ -583,133 +597,22 @@ const DashboardScreen = ({route, navigation}) => {
     setQuickPeriod(period);
     setSelectedMonth(null);
     setSelectedYear(null);
-    setBottomSheetVisible(false);
+    setShowQuickDropdown(false);
     // Data will update via useEffect
   };
 
   // Handle Month selection
   const handleMonthSelect = month => {
     setSelectedMonth(month);
-    setBottomSheetVisible(false);
+    setShowMonthDropdown(false);
     // Data will update via useEffect if year is also selected
   };
 
   // Handle Year selection
   const handleYearSelect = year => {
     setSelectedYear(year);
-    setBottomSheetVisible(false);
+    setShowYearDropdown(false);
     // Data will update via useEffect if month is also selected
-  };
-
-  const renderBottomSheetContent = () => {
-    if (bottomSheetContent === 'quick') {
-      return (
-        <>
-          <Text style={styles.bottomSheetTitle}>Select Period</Text>
-          {QUICK_PERIODS.map(period => (
-            <TouchableOpacity
-              key={period.value}
-              style={[
-                styles.dropdownOption,
-                quickPeriod === period.value && styles.dropdownOptionActive,
-              ]}
-              onPress={() => handleQuickPeriodSelect(period.value)}>
-              <Text
-                style={[
-                  styles.dropdownOptionText,
-                  quickPeriod === period.value && styles.dropdownOptionTextActive,
-                ]}>
-                {period.label}
-              </Text>
-              {quickPeriod === period.value && (
-                <Icon name="checkmark" size={18} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          ))}
-        </>
-      );
-    }
-
-    if (bottomSheetContent === 'month') {
-      return (
-        <>
-          <Text style={styles.bottomSheetTitle}>Select Month</Text>
-          {selectedMonth !== null && (
-            <TouchableOpacity
-              style={styles.dropdownOptionClear}
-              onPress={() => {
-                setSelectedMonth(null);
-                setBottomSheetVisible(false);
-              }}>
-              <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
-              <Icon name="close-circle" size={18} color={colors.error} />
-            </TouchableOpacity>
-          )}
-          {MONTHS.map(month => (
-            <TouchableOpacity
-              key={month.value}
-              style={[
-                styles.dropdownOption,
-                selectedMonth === month.value && styles.dropdownOptionActive,
-              ]}
-              onPress={() => handleMonthSelect(month.value)}>
-              <Text
-                style={[
-                  styles.dropdownOptionText,
-                  selectedMonth === month.value &&
-                    styles.dropdownOptionTextActive,
-                ]}>
-                {month.label}
-              </Text>
-              {selectedMonth === month.value && (
-                <Icon name="checkmark" size={18} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          ))}
-        </>
-      );
-    }
-
-    if (bottomSheetContent === 'year') {
-      return (
-        <>
-          <Text style={styles.bottomSheetTitle}>Select Year</Text>
-          {selectedYear !== null && (
-            <TouchableOpacity
-              style={styles.dropdownOptionClear}
-              onPress={() => {
-                setSelectedYear(null);
-                setBottomSheetVisible(false);
-              }}>
-              <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
-              <Icon name="close-circle" size={18} color={colors.error} />
-            </TouchableOpacity>
-          )}
-          {availableYears.map(year => (
-            <TouchableOpacity
-              key={year}
-              style={[
-                styles.dropdownOption,
-                selectedYear === year && styles.dropdownOptionActive,
-              ]}
-              onPress={() => handleYearSelect(year)}>
-              <Text
-                style={[
-                  styles.dropdownOptionText,
-                  selectedYear === year && styles.dropdownOptionTextActive,
-                ]}>
-                {year}
-              </Text>
-              {selectedYear === year && (
-                <Icon name="checkmark" size={18} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          ))}
-        </>
-      );
-    }
-
-    return null;
   };
 
   const formatCurrency = amount => {
@@ -722,41 +625,35 @@ const DashboardScreen = ({route, navigation}) => {
     return `${sign}\u20B9 ${absAmount.toLocaleString('en-IN')}`;
   };
 
-  const getSortIndexValue = (account, fallback) => {
-    const value = Number(account?.sort_index);
-    return Number.isFinite(value) ? value : fallback;
-  };
-
-  const moveSelectedAccount = async direction => {
-    if (!selectedAccount) {
+  const togglePinAccount = async account => {
+    if (!account) {
       return;
     }
-    const currentIndex = selectedAccountIndex;
-    if (currentIndex < 0) {
-      return;
-    }
-    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= accounts.length) {
-      return;
-    }
-    const currentAccount = accounts[currentIndex];
-    const targetAccount = accounts[targetIndex];
-    const currentSortIndex = getSortIndexValue(currentAccount, currentIndex);
-    const targetSortIndex = getSortIndexValue(targetAccount, targetIndex);
+    const accountId = String(account.id);
+    const isPinned = pinnedAccountIds.includes(accountId);
+    const updated = isPinned
+      ? pinnedAccountIds.filter(id => id !== accountId)
+      : [accountId, ...pinnedAccountIds];
     runPinReorderAnimation();
-    try {
-      await updateAccountSortIndex(currentAccount.id, targetSortIndex);
-      await updateAccountSortIndex(targetAccount.id, currentSortIndex);
-      loadAccounts();
-      showToast(
-        `Account moved ${direction === 'up' ? 'up' : 'down'}`,
-        'success'
+    setPinnedAccountIds(updated);
+    setAccounts(current =>
+      sortAccountsByPinned(current, updated, accountOrderIds)
+    );
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(
+        isPinned ? 'Account unpinned' : 'Account pinned to top',
+        ToastAndroid.SHORT
       );
+    } else {
+      Alert.alert(
+        isPinned ? 'Unpinned' : 'Pinned',
+        isPinned ? 'Account unpinned' : 'Account pinned to top'
+      );
+    }
+    try {
+      await AsyncStorage.setItem('pinnedAccountIds', JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to move account:', error);
-      showToast('Failed to move account', 'error');
-    } finally {
-      closeContextMenu();
+      console.error('Failed to save pinned accounts:', error);
     }
   };
 
@@ -798,14 +695,6 @@ const DashboardScreen = ({route, navigation}) => {
 
   const handleDeleteAccount = () => {
     if (!selectedAccount) return;
-    const balance = Number(selectedAccount?.balance) || 0;
-    if (Math.abs(balance) > 0.000001) {
-      Alert.alert(
-        'Balance Not Settled',
-        'This account balance is not settled. Please settle it to 0 before removing the account.'
-      );
-      return;
-    }
     Alert.alert(
       'Delete Account',
       `Are you sure you want to delete the account "${selectedAccount.account_name}"? All associated transactions will also be deleted. This action cannot be undone.`,
@@ -849,7 +738,7 @@ const DashboardScreen = ({route, navigation}) => {
     }
     try {
       await renameAccount(selectedAccount.id, newAccountName.trim());
-      showToast('Account renamed successfully', 'success');
+      ToastAndroid.show('Account renamed successfully', ToastAndroid.SHORT);
       loadAccounts(); // Refresh the list
     } catch (e) {
       Alert.alert('Error', 'Failed to rename account.');
@@ -865,7 +754,7 @@ const DashboardScreen = ({route, navigation}) => {
           <View style={styles.accountMetricsCard}>
             <View style={styles.dropdownGrid}>
               <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Quick Period</Text>
+                
                 <TouchableOpacity
                   style={[
                     styles.dropdown,
@@ -875,8 +764,7 @@ const DashboardScreen = ({route, navigation}) => {
                   ]}
                   onPress={() => {
                     if (selectedMonth === null || selectedYear === null) {
-                      setBottomSheetContent('quick');
-                      setBottomSheetVisible(true);
+                      setShowQuickDropdown(!showQuickDropdown);
                     }
                   }}
                   disabled={selectedMonth !== null && selectedYear !== null}>
@@ -902,13 +790,10 @@ const DashboardScreen = ({route, navigation}) => {
                 </TouchableOpacity>
               </View>
               <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Month</Text>
+                
                 <TouchableOpacity
                   style={styles.dropdown}
-                  onPress={() => {
-                    setBottomSheetContent('month');
-                    setBottomSheetVisible(true);
-                  }}>
+                  onPress={() => setShowMonthDropdown(!showMonthDropdown)}>
                   <Text style={styles.dropdownText}>
                     {selectedMonth !== null
                       ? MONTHS[selectedMonth].label
@@ -922,13 +807,10 @@ const DashboardScreen = ({route, navigation}) => {
                 </TouchableOpacity>
               </View>
               <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Year</Text>
+                
                 <TouchableOpacity
                   style={styles.dropdown}
-                  onPress={() => {
-                    setBottomSheetContent('year');
-                    setBottomSheetVisible(true);
-                  }}>
+                  onPress={() => setShowYearDropdown(!showYearDropdown)}>
                   <Text style={styles.dropdownText}>
                     {selectedYear !== null ? selectedYear : 'Year'}
                   </Text>
@@ -941,7 +823,7 @@ const DashboardScreen = ({route, navigation}) => {
               </View>
             </View>
             <View style={styles.accountMetricsRow}>
-              <View style={styles.accountMetricThird}>
+              <View style={styles.accountMetricHalf}>
                 <View style={styles.accountMetricLabelRow}>
                   <View
                     style={[
@@ -950,7 +832,7 @@ const DashboardScreen = ({route, navigation}) => {
                     ]}>
                     <FaArrowCircleUp size={24} color={colors.success} />
                   </View>
-                  <Text style={styles.accountMetricLabel}>Earning</Text>
+                  <Text style={styles.accountMetricLabel}>Total Earning</Text>
                 </View>
                 <Text
                   style={[
@@ -960,8 +842,8 @@ const DashboardScreen = ({route, navigation}) => {
                   {formatCurrencyRupee(filteredEarning)}
                 </Text>
               </View>
-              <View style={styles.accountMetricDivider} />
-              <View style={styles.accountMetricThird}>
+                <View style={styles.accountMetricDivider} />
+              <View style={styles.accountMetricHalf}>
                 <View style={styles.accountMetricLabelRow}>
                   <View
                     style={[
@@ -970,7 +852,7 @@ const DashboardScreen = ({route, navigation}) => {
                     ]}>
                     <FaArrowCircleDown size={24} color={colors.error} />
                   </View>
-                  <Text style={styles.accountMetricLabel}>Expenses</Text>
+                  <Text style={styles.accountMetricLabel}>Total Expenses</Text>
                 </View>
                 <Text
                   style={[
@@ -979,26 +861,6 @@ const DashboardScreen = ({route, navigation}) => {
                     styles.accountMetricNegative,
                   ]}>
                   {formatCurrencyRupee(filteredWithdrawals)}
-                </Text>
-              </View>
-              <View style={styles.accountMetricDivider} />
-              <View style={styles.accountMetricThird}>
-                <View style={styles.accountMetricLabelRow}>
-                  <View
-                    style={[
-                      styles.accountMetricIcon,
-                      {backgroundColor: colors.white},
-                    ]}>
-                    <Icon name="wallet" size={24} color="#2196F3" />
-                  </View>
-                  <Text style={styles.accountMetricLabel}>Net Balance</Text>
-                </View>
-                <Text
-                  style={[
-                    styles.accountMetricValue,
-                    styles.accountMetricValueIndented,
-                  ]}>
-                  {formatCurrencyRupee(netBalance)}
                 </Text>
               </View>
             </View>
@@ -1033,6 +895,11 @@ const DashboardScreen = ({route, navigation}) => {
                     {account.account_type === 'earning' ? 'EARNING' : 'EXPENSES'}
                   </Text>
                   <View style={styles.badgeContainer}>
+                    {pinnedAccountIds.includes(String(account.id)) && (
+                      <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
+                        <MaterialIcon name="push-pin" size={12} color={colors.white} style={{ transform: [{ rotate: '45deg' }] }} />
+                      </View>
+                    )}
                     {account.is_primary === 1 && (
                       <View style={[styles.badge, {backgroundColor: colors.text.light}]}>
                         <Icon name="star" size={12} color={colors.white} />
@@ -1081,7 +948,8 @@ const DashboardScreen = ({route, navigation}) => {
                               styles.accountBalanceAmount,
                               account.icon_color && {color: account.icon_color},
                             ]}>
-                            {formatCurrency(account.balance || 0)}
+                            {(account.account_type === 'earning' ? '+' : '-') +
+                              formatCurrency(account.balance || 0)}
                           </Text>
                         </Text>
                       <Text style={styles.accountDate}>
@@ -1152,12 +1020,138 @@ const DashboardScreen = ({route, navigation}) => {
         }}
       />
 
-      {/* Bottom Sheet for Period/Month/Year */}
-      <BottomSheet
-        visible={isBottomSheetVisible}
-        onClose={() => setBottomSheetVisible(false)}>
-        {renderBottomSheetContent()}
-      </BottomSheet>
+      {/* Quick Period Dropdown Modal */}
+      <Modal
+        visible={showQuickDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowQuickDropdown(false)}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowQuickDropdown(false)}>
+          <View style={styles.dropdownModal}>
+            {QUICK_PERIODS.map(period => (
+              <TouchableOpacity
+                key={period.value}
+                style={[
+                  styles.dropdownOption,
+                  quickPeriod === period.value && styles.dropdownOptionActive,
+                ]}
+                onPress={() => handleQuickPeriodSelect(period.value)}>
+                <Text
+                  style={[
+                    styles.dropdownOptionText,
+                    quickPeriod === period.value &&
+                      styles.dropdownOptionTextActive,
+                  ]}>
+                  {period.label}
+                </Text>
+                {quickPeriod === period.value && (
+                  <Icon name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Month Dropdown Modal */}
+      <Modal
+        visible={showMonthDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMonthDropdown(false)}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowMonthDropdown(false)}>
+          <View style={styles.dropdownModalScrollable}>
+            <ScrollView showsVerticalScrollIndicator={true}>
+              {selectedMonth !== null && (
+                <TouchableOpacity
+                  style={styles.dropdownOptionClear}
+                  onPress={() => {
+                    setSelectedMonth(null);
+                    setShowMonthDropdown(false);
+                  }}>
+                  <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
+                  <Icon name="close-circle" size={18} color={colors.error} />
+                </TouchableOpacity>
+              )}
+              {MONTHS.map(month => (
+                <TouchableOpacity
+                  key={month.value}
+                  style={[
+                    styles.dropdownOption,
+                    selectedMonth === month.value && styles.dropdownOptionActive,
+                  ]}
+                  onPress={() => handleMonthSelect(month.value)}>
+                  <Text
+                    style={[
+                      styles.dropdownOptionText,
+                      selectedMonth === month.value &&
+                        styles.dropdownOptionTextActive,
+                    ]}>
+                    {month.label}
+                  </Text>
+                  {selectedMonth === month.value && (
+                    <Icon name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Year Dropdown Modal */}
+      <Modal
+        visible={showYearDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowYearDropdown(false)}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowYearDropdown(false)}>
+          <View style={styles.dropdownModalScrollable}>
+            <ScrollView showsVerticalScrollIndicator={true}>
+              {selectedYear !== null && (
+                <TouchableOpacity
+                  style={styles.dropdownOptionClear}
+                  onPress={() => {
+                    setSelectedYear(null);
+                    setShowYearDropdown(false);
+                  }}>
+                  <Text style={styles.dropdownOptionClearText}>Clear Selection</Text>
+                  <Icon name="close-circle" size={18} color={colors.error} />
+                </TouchableOpacity>
+              )}
+              {availableYears.map(year => (
+                <TouchableOpacity
+                  key={year}
+                  style={[
+                    styles.dropdownOption,
+                    selectedYear === year && styles.dropdownOptionActive,
+                  ]}
+                  onPress={() => handleYearSelect(year)}>
+                  <Text
+                    style={[
+                      styles.dropdownOptionText,
+                      selectedYear === year && styles.dropdownOptionTextActive,
+                    ]}>
+                    {year}
+                  </Text>
+                  {selectedYear === year && (
+                    <Icon name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Context Menu Modal */}
       <Modal
@@ -1186,47 +1180,20 @@ const DashboardScreen = ({route, navigation}) => {
               </Text>
             </View>
             <TouchableOpacity
-              style={[
-                styles.contextMenuItem,
-                isMoveUpDisabled && styles.contextMenuItemDisabled,
-              ]}
-              disabled={isMoveUpDisabled}
-              onPress={() => moveSelectedAccount('up')}>
-              <Icon
-                name="arrow-up"
+              style={styles.contextMenuItem}
+              onPress={() => {
+                togglePinAccount(selectedAccount);
+                closeContextMenu();
+              }}>
+              <MaterialIcon
+                name="push-pin"
                 size={22}
-                color={
-                  isMoveUpDisabled ? colors.text.light : colors.text.primary
-                }
+                color={colors.text.primary}
               />
-              <Text
-                style={[
-                  styles.contextMenuItemText,
-                  isMoveUpDisabled && styles.contextMenuItemTextDisabled,
-                ]}>
-                Move Up
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.contextMenuItem,
-                isMoveDownDisabled && styles.contextMenuItemDisabled,
-              ]}
-              disabled={isMoveDownDisabled}
-              onPress={() => moveSelectedAccount('down')}>
-              <Icon
-                name="arrow-down"
-                size={22}
-                color={
-                  isMoveDownDisabled ? colors.text.light : colors.text.primary
-                }
-              />
-              <Text
-                style={[
-                  styles.contextMenuItemText,
-                  isMoveDownDisabled && styles.contextMenuItemTextDisabled,
-                ]}>
-                Move Down
+              <Text style={styles.contextMenuItemText}>
+                {pinnedAccountIds.includes(String(selectedAccount?.id))
+                  ? 'Unpin from Top'
+                  : 'Pin to Top'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1290,34 +1257,6 @@ const DashboardScreen = ({route, navigation}) => {
                 <Text style={styles.renameModalButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
-
-       {/* Setup Completion Popup */}
-       <Modal
-        visible={showSetupPopup}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={handleRemindLater}>
-        <View style={styles.setupModalOverlay}>
-          <View style={styles.setupModalContainer}>
-            <Text style={styles.setupModalTitle}>Complete Your Profile Setup</Text>
-            <Text style={styles.setupModalDescription}>
-              Please complete your profile to unlock all features and ensure data backup.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.setupPrimaryButton}
-              onPress={handleGoToProfile}>
-              <Text style={styles.setupPrimaryButtonText}>Go to Profile Settings</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.setupSecondaryButton}
-              onPress={handleRemindLater}>
-              <Text style={styles.setupSecondaryButtonText}>Remind Me Later</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1407,7 +1346,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  accountMetricThird: {
+  accountMetricHalf: {
     flex: 1,
   },
   accountMetricDivider: {
@@ -1430,7 +1369,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   accountMetricValueIndented: {
-    textAlign: 'center',
+    marginLeft: METRIC_LABEL_OFFSET,
   },
   accountMetricIconNegative: {
     backgroundColor: colors.error,
@@ -1712,14 +1651,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: fontWeight.bold,
   },
-  bottomSheetTitle: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: colors.text.primary,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
-  },
   dropdownOptionClear: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1774,16 +1705,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: 12,
   },
-  contextMenuItemDisabled: {
-    opacity: 0.45,
-  },
   contextMenuItemText: {
     fontSize: fontSize.regular,
     color: colors.text.primary,
     fontWeight: fontWeight.medium,
-  },
-  contextMenuItemTextDisabled: {
-    color: colors.text.light,
   },
   contextMenuItemCancel: {
     borderTopWidth: 1,
@@ -1846,63 +1771,6 @@ const styles = StyleSheet.create({
   renameModalCancelButtonText: {
     color: colors.text.primary,
     fontWeight: 'bold',
-  },
-  setupModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  setupModalContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '85%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  setupModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  setupModalDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  setupPrimaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginBottom: 12,
-    alignItems: 'center',
-  },
-  setupPrimaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  setupSecondaryButton: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  setupSecondaryButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '500',
   },
 });
 

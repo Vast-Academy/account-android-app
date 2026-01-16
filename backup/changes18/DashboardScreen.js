@@ -1081,7 +1081,8 @@ const DashboardScreen = ({route, navigation}) => {
                               styles.accountBalanceAmount,
                               account.icon_color && {color: account.icon_color},
                             ]}>
-                            {formatCurrency(account.balance || 0)}
+                            {(account.account_type === 'earning' ? '+' : '-') +
+                              formatCurrency(account.balance || 0)}
                           </Text>
                         </Text>
                       <Text style={styles.accountDate}>
@@ -1535,12 +1536,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 12,
     top: '50%',
-    fontSize: 28,
+    fontSize: 42,
     fontWeight: 'bold',
     color: colors.text.primary,
     opacity: 0.06,
     letterSpacing: 2,
-    transform: [{translateY: -14}],
+    transform: [{translateY: -21}],
   },
   accountRow: {
     flexDirection: 'row',
