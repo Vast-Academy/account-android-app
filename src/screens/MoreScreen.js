@@ -28,6 +28,7 @@ import {clearLocalData} from '../services/database';
 import {clearAllAccountsData} from '../services/accountsDatabase';
 import {clearAllLedgerData} from '../services/ledgerDatabase';
 import {queueBackupFromStorage} from '../utils/backupQueue';
+import BottomSheet from '../components/BottomSheet';
 import {updateProfile} from '../services/api';
 import {useToast} from '../hooks/useToast';
 
@@ -120,6 +121,94 @@ const OCCUPATION_OPTIONS = [
   {label: 'Welder', value: 'Welder'},
   {label: 'Other (Manual)', value: 'manual'},
 ];
+
+const OCCUPATION_ICON_MAP = {
+  Accountant: 'calculator-outline',
+  'Architect/Planner': 'business-outline',
+  'Artist/Painter': 'color-palette-outline',
+  'Auto Driver': 'car-outline',
+  Baker: 'cafe-outline',
+  'Bank Employee': 'card-outline',
+  'Business Owner': 'briefcase-outline',
+  Carpenter: 'construct-outline',
+  'Chef/Cook': 'restaurant-outline',
+  'Civil Engineer': 'build-outline',
+  Clerk: 'documents-outline',
+  'Computer Operator': 'laptop-outline',
+  'Construction Worker': 'hammer-outline',
+  Consultant: 'bulb-outline',
+  'Delivery Person': 'bicycle-outline',
+  Designer: 'brush-outline',
+  Doctor: 'medkit-outline',
+  Driver: 'car-sport-outline',
+  Electrician: 'flash-outline',
+  Engineer: 'cog-outline',
+  'Event Manager': 'calendar-outline',
+  Farmer: 'leaf-outline',
+  'Fashion Designer': 'color-palette-outline',
+  'Financial Advisor': 'cash-outline',
+  'Graphic Designer': 'images-outline',
+  'Government Officer': 'ribbon-outline',
+  'Hair Stylist': 'cut-outline',
+  'Hotel Manager': 'bed-outline',
+  'HR Manager': 'people-outline',
+  Homemaker: 'home-outline',
+  'Interior Designer': 'color-palette-outline',
+  'IT Professional': 'hardware-chip-outline',
+  Journalist: 'newspaper-outline',
+  Judge: 'scale-outline',
+  'Lab Technician': 'flask-outline',
+  Labourer: 'hammer-outline',
+  Lawyer: 'scale-outline',
+  Lecturer: 'school-outline',
+  'Legal Advisor': 'scale-outline',
+  Manager: 'briefcase-outline',
+  'Marketing Executive': 'megaphone-outline',
+  Mechanic: 'build-outline',
+  'Medical Officer': 'medkit-outline',
+  'Medical Representative': 'medkit-outline',
+  Nurse: 'fitness-outline',
+  'Office Assistant': 'documents-outline',
+  'Operations Manager': 'settings-outline',
+  Painter: 'color-palette-outline',
+  Pharmacist: 'medkit-outline',
+  Photographer: 'camera-outline',
+  Physiotherapist: 'fitness-outline',
+  Pilot: 'airplane-outline',
+  Plumber: 'water-outline',
+  'Police Officer': 'shield-checkmark-outline',
+  Professor: 'school-outline',
+  'Project Manager': 'clipboard-outline',
+  'Property Dealer': 'home-outline',
+  Psychologist: 'chatbubble-ellipses-outline',
+  Researcher: 'flask-outline',
+  'Restaurant Owner': 'restaurant-outline',
+  'Sales Executive': 'trending-up-outline',
+  'Security Guard': 'shield-outline',
+  'Shop Owner': 'storefront-outline',
+  'Social Media Manager': 'share-social-outline',
+  'Social Worker': 'people-outline',
+  'Software Developer': 'code-slash-outline',
+  'Stock Trader': 'swap-horizontal-outline',
+  'Store Manager': 'storefront-outline',
+  Student: 'school-outline',
+  Teacher: 'school-outline',
+  Technician: 'construct-outline',
+  Trader: 'swap-horizontal-outline',
+  Trainer: 'barbell-outline',
+  'Transport Operator': 'bus-outline',
+  'Travel Agent': 'airplane-outline',
+  'UI/UX Designer': 'layers-outline',
+  'Video Editor': 'videocam-outline',
+  'Warehouse Manager': 'archive-outline',
+  'Web Developer': 'globe-outline',
+  Welder: 'flame-outline',
+  'Other (Manual)': 'briefcase-outline',
+};
+
+const getOccupationIcon = label => {
+  return OCCUPATION_ICON_MAP[label] || 'briefcase-outline';
+};
 
 const normalizeImageUri = uri => {
   if (!uri) {
@@ -856,52 +945,49 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               </TouchableOpacity>
             </View>
           </Modal>
-          <Modal
+          <BottomSheet
             visible={occupationModalVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setOccupationModalVisible(false)}>
-            <View style={styles.previewOverlay}>
-              <TouchableOpacity
-                style={styles.previewBackdrop}
-                activeOpacity={1}
-                onPress={() => setOccupationModalVisible(false)}
-              />
-              <View style={styles.occupationModalCard}>
-                <Text style={styles.occupationModalTitle}>
-                  Select Occupation
-                </Text>
-                <ScrollView style={styles.occupationList}>
-                  {OCCUPATION_OPTIONS.map(option => {
-                    const isSelected = occupationChoice === option.value;
-                    return (
-                      <TouchableOpacity
-                        key={option.value}
-                        style={[
-                          styles.occupationOption,
-                          isSelected && styles.occupationOptionSelected,
-                        ]}
-                        onPress={() => {
-                          setOccupationChoice(option.value);
-                          if (option.value !== 'manual') {
-                            setManualOccupation('');
-                          }
-                          setOccupationModalVisible(false);
-                        }}>
-                        <Text
-                          style={[
-                            styles.occupationOptionText,
-                            isSelected && styles.occupationOptionTextSelected,
-                          ]}>
-                          {option.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
+            onClose={() => setOccupationModalVisible(false)}>
+            <Text style={styles.bottomSheetTitle}>Select Occupation</Text>
+            {OCCUPATION_OPTIONS.map(option => {
+              const isSelected = occupationChoice === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.dropdownOption,
+                    isSelected && styles.dropdownOptionActive,
+                  ]}
+                  onPress={() => {
+                    setOccupationChoice(option.value);
+                    if (option.value !== 'manual') {
+                      setManualOccupation('');
+                    }
+                    setOccupationModalVisible(false);
+                  }}>
+                  <View style={styles.dropdownOptionRow}>
+                    <View style={styles.dropdownOptionIcon}>
+                      <Icon
+                        name={getOccupationIcon(option.label)}
+                        size={18}
+                        color={colors.text.secondary}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.dropdownOptionText,
+                        isSelected && styles.dropdownOptionTextActive,
+                      ]}>
+                      {option.label}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <Icon name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </BottomSheet>
         </Animated.View>
       )}
     </View>
@@ -1165,42 +1251,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  occupationModalCard: {
-    width: '85%',
-    maxHeight: '70%',
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: spacing.md,
-  },
-  occupationModalTitle: {
+  bottomSheetTitle: {
     fontSize: fontSize.large,
-    fontWeight: fontWeight.semibold,
+    fontWeight: fontWeight.bold,
     color: colors.text.primary,
-    marginBottom: spacing.sm,
-  },
-  occupationList: {
-    maxHeight: 360,
-  },
-  occupationOption: {
-    paddingVertical: 12,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  occupationOptionSelected: {
-    backgroundColor: colors.background,
+  dropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
-  occupationOptionText: {
+  dropdownOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dropdownOptionIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownOptionActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  dropdownOptionText: {
     fontSize: fontSize.regular,
     color: colors.text.primary,
+    fontWeight: fontWeight.medium,
   },
-  occupationOptionTextSelected: {
+  dropdownOptionTextActive: {
     color: colors.primary,
-    fontWeight: fontWeight.semibold,
+    fontWeight: fontWeight.bold,
   },
 });
 
 export default MoreScreen;
+
 
 
 
