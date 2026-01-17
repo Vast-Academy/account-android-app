@@ -10,6 +10,8 @@ import ExpensesAccountDetailScreen from '../screens/ExpensesAccountDetailScreen'
 import LedgerContactDetailScreen from '../screens/LedgerContactDetailScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BackupScreen from '../screens/BackupScreen';
+import CurrencySetupScreen from '../screens/CurrencySetupScreen';
+import ProfileSetupScreen from '../screens/ProfileSetupScreen';
 
 const Stack = createStackNavigator();
 
@@ -29,6 +31,8 @@ const AppNavigator = () => {
         <Stack.Screen name="LedgerContactDetail" component={LedgerContactDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Backup" component={BackupScreen} />
+        <Stack.Screen name="CurrencySetup" component={CurrencySetupScreen} />
+        <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

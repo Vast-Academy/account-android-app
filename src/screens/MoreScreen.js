@@ -29,6 +29,7 @@ import {clearAllAccountsData} from '../services/accountsDatabase';
 import {clearAllLedgerData} from '../services/ledgerDatabase';
 import {queueBackupFromStorage} from '../utils/backupQueue';
 import {updateProfile} from '../services/api';
+import {useToast} from '../hooks/useToast';
 
 const OCCUPATION_OPTIONS = [
   {label: 'Business Owner', value: 'Business Owner'},
@@ -137,6 +138,9 @@ const normalizeImageUri = uri => {
 
 const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const routeUser = route.params?.user;
+  const openProfileOnFocus = route.params?.openProfileOnFocus;
+  const returnToDashboardOnSave = route.params?.returnToDashboardOnSave;
+  const {showToast} = useToast();
   const [currentUser, setCurrentUser] = React.useState(
     user || routeUser || {},
   );
@@ -157,8 +161,10 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const profileSlideX = React.useRef(new Animated.Value(screenWidth)).current;
   const isSlidingRef = React.useRef(false);
   const skipNextSlideInRef = React.useRef(false);
+  const slideInDirectionRef = React.useRef('right');
   const profileVisibleRef = React.useRef(false);
   const profileBackRef = React.useRef(() => {});
+  const openedProfileFromPromptRef = React.useRef(false);
   const panResponder = React.useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
@@ -239,16 +245,21 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       try {
         const stored = await AsyncStorage.getItem('user');
         if (stored) {
-          setCurrentUser(JSON.parse(stored));
-          return;
+          const parsedUser = JSON.parse(stored);
+          setCurrentUser(parsedUser);
+          return parsedUser;
         }
-        setCurrentUser(user || routeUser || {});
+        const fallbackUser = user || routeUser || {};
+        setCurrentUser(fallbackUser);
+        return fallbackUser;
       } catch (error) {
         console.error('Failed to load user:', error);
+        return user || routeUser || {};
       }
     };
-    const runSlideIn = () => {
-      slideX.setValue(screenWidth);
+    const runSlideIn = (direction = 'right') => {
+      const startX = direction === 'left' ? -screenWidth : screenWidth;
+      slideX.setValue(startX);
       Animated.timing(slideX, {
         toValue: 0,
         duration: 260,
@@ -257,18 +268,26 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       }).start();
     };
     const handleFocus = () => {
-      loadUser();
+      loadUser().then(loadedUser => {
+        if (openProfileOnFocus && !openedProfileFromPromptRef.current) {
+          openedProfileFromPromptRef.current = true;
+          openProfile(loadedUser);
+          navigation.setParams({openProfileOnFocus: false});
+        }
+      });
       if (skipNextSlideInRef.current) {
         skipNextSlideInRef.current = false;
         slideX.setValue(0);
         return;
       }
-      runSlideIn();
+      const direction = slideInDirectionRef.current || 'right';
+      slideInDirectionRef.current = 'right';
+      runSlideIn(direction);
     };
     const unsubscribe = navigation.addListener('focus', handleFocus);
     handleFocus();
     return unsubscribe;
-  }, [navigation, user, routeUser, screenWidth, slideX]);
+  }, [navigation, user, routeUser, screenWidth, slideX, openProfileOnFocus]);
 
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -297,8 +316,9 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     ]);
   };
 
-  const openProfile = () => {
-    const currentOccupation = currentUser?.occupation || '';
+  const openProfile = userOverride => {
+    const profileUser = userOverride || currentUser || {};
+    const currentOccupation = profileUser?.occupation || '';
     const matchedOption = OCCUPATION_OPTIONS.find(
       option => option.value !== 'manual' && option.value === currentOccupation,
     );
@@ -312,11 +332,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       setOccupationChoice('');
       setManualOccupation('');
     }
-    setDraftName(currentUser?.displayName || '');
-    setDraftPhoto(normalizeImageUri(currentUser?.photoURL || ''));
-    setDraftDob(currentUser?.dob || '');
-    setDraftPhoneNumber(currentUser?.phoneNumber || '');
-    setDraftGender(currentUser?.gender || '');
+    setDraftName(profileUser?.displayName || profileUser?.name || '');
+    setDraftPhoto(normalizeImageUri(profileUser?.photoURL || ''));
+    setDraftDob(profileUser?.dob || '');
+    setDraftPhoneNumber(
+      profileUser?.phoneNumber || profileUser?.mobile || ''
+    );
+    setDraftGender(profileUser?.gender || '');
     setProfileVisible(true);
     profileSlideX.setValue(screenWidth);
     Animated.timing(profileSlideX, {
@@ -379,8 +401,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       return;
     }
 
-    // Validate mobile number if provided
-    if (draftPhoneNumber.trim() && !/^\d{10}$/.test(draftPhoneNumber.trim())) {
+    if (!draftPhoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter a phone number');
+      return;
+    }
+
+    // Validate mobile number
+    if (!/^\d{10}$/.test(draftPhoneNumber.trim())) {
       Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
       return;
     }
@@ -420,19 +447,32 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
           });
         }
 
-        // Merge backend response with local photo URL
+        // Merge backend response with local values
         const updatedUser = {
           ...response.user,
+          displayName: draftName.trim(),
           photoURL: normalizedPhoto,
           phoneNumber: draftPhoneNumber.trim(),
+          mobile: draftPhoneNumber.trim(),
+          setupComplete: true,
         };
 
         setCurrentUser(updatedUser);
         await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+        if (onProfileUpdate) {
+          await onProfileUpdate(updatedUser);
+        }
         queueBackupFromStorage();
 
-        Alert.alert('Success', 'Profile updated successfully!');
+        showToast('Profile updated successfully!', 'success');
         closeProfile();
+        if (returnToDashboardOnSave) {
+          navigation.setParams({
+            returnToDashboardOnSave: false,
+            openProfileOnFocus: false,
+          });
+          navigation.navigate('Dashboard');
+        }
       } else {
         Alert.alert('Error', response.message || 'Failed to update profile');
       }
@@ -506,16 +546,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
 
   const menuItems = [
     {
-      id: 'profile',
-      title: 'Profile',
-      icon: 'person-outline',
-      onPress: openProfile,
-    },
-    {
       id: 'backup',
       title: 'Backup & Restore',
       icon: 'cloud-upload-outline',
-      onPress: () => navigation.navigate('Backup'),
+      onPress: () => {
+        slideInDirectionRef.current = 'left';
+        navigation.navigate('Backup');
+      },
     },
     {
       id: 'settings',
@@ -540,7 +577,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       onPress: () => {
         const versionName = NativeModules?.VersionInfo?.versionName ?? 'unknown';
         const versionCode = NativeModules?.VersionInfo?.versionCode ?? 'unknown';
-        Alert.alert('Account App', `Version ${versionName} (${versionCode})`);
+        Alert.alert('Savingo', `Version ${versionName} (${versionCode})`);
       },
     },
   ];
@@ -615,7 +652,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
         <ScrollView style={styles.scrollView}>
           <TouchableOpacity
             style={styles.profileSection}
-            onPress={openProfile}
+            onPress={() => openProfile()}
             activeOpacity={0.75}
             accessibilityRole="button"
             accessibilityLabel="Open profile settings">
@@ -735,7 +772,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               keyboardType="phone-pad"
               editable={!saving}
             />
-
             <Text style={styles.profileLabel}>Gender</Text>
             <TouchableOpacity
               style={styles.occupationPicker}
@@ -755,16 +791,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 color={colors.text.secondary}
               />
             </TouchableOpacity>
-
-            <Text style={styles.profileLabel}>DOB</Text>
-            <TextInput
-              style={styles.profileInput}
-              value={draftDob}
-              onChangeText={setDraftDob}
-              placeholder="DD/MM/YYYY"
-              keyboardType="numbers-and-punctuation"
-              editable={!saving}
-            />
 
             <Text style={styles.profileLabel}>Occupation</Text>
             <TouchableOpacity
@@ -1175,3 +1201,10 @@ const styles = StyleSheet.create({
 });
 
 export default MoreScreen;
+
+
+
+
+
+
+

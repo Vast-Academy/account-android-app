@@ -27,6 +27,7 @@ import {
   getAllAccounts,
   renameAccount,
   deleteAccountAndTransactions,
+  updateAccountPrimary,
   updateAccountSortIndex,
 } from '../services/accountsDatabase';
 import {
@@ -37,6 +38,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useToast} from '../hooks/useToast';
 import {useFocusEffect} from '@react-navigation/native';
+import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 
 // Quick Period Options
 const QUICK_PERIODS = [
@@ -125,10 +127,12 @@ const DashboardScreen = ({route, navigation}) => {
   const [newAccountName, setNewAccountName] = useState('');
   const [fabLayout, setFabLayout] = useState(null);
   const {showToast} = useToast();
+  const currencySymbol = useCurrencySymbol();
 
-   // Setup completion popup states
-   const [showSetupPopup, setShowSetupPopup] = useState(false);
-   const [popupDismissedThisSession, setPopupDismissedThisSession] = useState(false);
+  // Setup completion popup states
+  const [showSetupPopup, setShowSetupPopup] = useState(false);
+  const [popupDismissedThisSession, setPopupDismissedThisSession] =
+    useState(false);
 
   const fabRef = useRef(null);
 
@@ -218,9 +222,30 @@ const DashboardScreen = ({route, navigation}) => {
       account => String(account.id) === String(selectedAccount.id)
     );
   }, [accounts, selectedAccount]);
-  const isMoveUpDisabled = selectedAccountIndex <= 0;
+
+  const selectedAccountType = selectedAccount?.account_type;
+  const accountsOfType = React.useMemo(() => {
+    if (!selectedAccountType) {
+      return [];
+    }
+    return accounts.filter(
+      account => account.account_type === selectedAccountType
+    );
+  }, [accounts, selectedAccountType]);
+  const selectedAccountTypeIndex = React.useMemo(() => {
+    if (!selectedAccount) {
+      return -1;
+    }
+    return accountsOfType.findIndex(
+      account => String(account.id) === String(selectedAccount.id)
+    );
+  }, [accountsOfType, selectedAccount]);
+  const canMoveWithinType = accountsOfType.length >= 2;
+  const isMoveUpDisabled = !canMoveWithinType || selectedAccountTypeIndex <= 0;
   const isMoveDownDisabled =
-    selectedAccountIndex < 0 || selectedAccountIndex >= accounts.length - 1;
+    !canMoveWithinType ||
+    selectedAccountTypeIndex < 0 ||
+    selectedAccountTypeIndex >= accountsOfType.length - 1;
 
   // Animation values
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -281,6 +306,20 @@ const DashboardScreen = ({route, navigation}) => {
     generateAvailableYears();
   }, [accounts]);
 
+  const hasBasicDetails = userData => {
+    const name = String(userData?.displayName || userData?.name || '').trim();
+    const phone = String(
+      userData?.phoneNumber || userData?.mobile || ''
+    ).trim();
+    const currency = String(
+      userData?.currencySymbol ||
+        userData?.currency ||
+        userData?.currency_symbol ||
+        ''
+    ).trim();
+    return Boolean(name) && Boolean(phone) && Boolean(currency);
+  };
+
   // Check setup completion status on screen focus
   useFocusEffect(
     React.useCallback(() => {
@@ -289,7 +328,9 @@ const DashboardScreen = ({route, navigation}) => {
           const storedUser = await AsyncStorage.getItem('user');
           if (storedUser) {
             const userData = JSON.parse(storedUser);
-            if (!userData.setupComplete && !popupDismissedThisSession) {
+            const setupComplete = Boolean(userData?.setupComplete);
+            const missingDetails = !hasBasicDetails(userData);
+            if (!setupComplete && missingDetails && !popupDismissedThisSession) {
               setShowSetupPopup(true);
             }
           }
@@ -304,7 +345,10 @@ const DashboardScreen = ({route, navigation}) => {
 
   const handleGoToProfile = () => {
     setShowSetupPopup(false);
-    navigation.navigate('More');
+    navigation.navigate('More', {
+      openProfileOnFocus: true,
+      returnToDashboardOnSave: true,
+    });
   };
 
   const handleRemindLater = () => {
@@ -721,13 +765,13 @@ const DashboardScreen = ({route, navigation}) => {
   };
 
   const formatCurrency = amount => {
-    return `\u20B9 ${amount.toLocaleString('en-IN')}`;
+    return `${currencySymbol} ${amount.toLocaleString('en-IN')}`;
   };
 
   const formatCurrencyRupee = amount => {
     const sign = amount < 0 ? '-' : '';
     const absAmount = Math.abs(amount);
-    return `${sign}\u20B9 ${absAmount.toLocaleString('en-IN')}`;
+    return `${sign}${currencySymbol} ${absAmount.toLocaleString('en-IN')}`;
   };
 
   const getSortIndexValue = (account, fallback) => {
@@ -738,6 +782,9 @@ const DashboardScreen = ({route, navigation}) => {
   const moveSelectedAccount = async direction => {
     const account = selectedAccountRef.current || selectedAccount;
     if (!account) {
+      return;
+    }
+    if (!canMoveWithinType) {
       return;
     }
     const currentIndex =
@@ -764,11 +811,12 @@ const DashboardScreen = ({route, navigation}) => {
       loadAccounts();
       showToast(
         `Account moved ${direction === 'up' ? 'up' : 'down'}`,
-        'success'
+        'success',
+        3000
       );
     } catch (error) {
       console.error('Failed to move account:', error);
-      showToast('Failed to move account', 'error');
+      showToast('Failed to move account', 'error', 3000);
     } finally {
       closeContextMenu();
     }
@@ -811,6 +859,29 @@ const DashboardScreen = ({route, navigation}) => {
       selectedAccountRef.current = null;
     });
   };
+  const handleSetPrimary = async () => {
+    const account = selectedAccountRef.current || selectedAccount;
+    if (!account) {
+      return;
+    }
+    if (account.account_type !== 'earning') {
+      return;
+    }
+    if (Number(account.is_primary) === 1) {
+      closeContextMenu();
+      return;
+    }
+    try {
+      await updateAccountPrimary(account.id, true);
+      showToast('Primary account updated.', 'success', 3000);
+      loadAccounts();
+    } catch (error) {
+      console.error('Failed to update primary status:', error);
+      showToast('Failed to update primary account.', 'error', 3000);
+    } finally {
+      closeContextMenu();
+    }
+  };
 
   const handleDeleteAccount = () => {
     const account = selectedAccountRef.current || selectedAccount;
@@ -834,7 +905,7 @@ const DashboardScreen = ({route, navigation}) => {
           onPress: async () => {
             try {
               await deleteAccountAndTransactions(account.id);
-              showToast('Account deleted successfully', 'success');
+              showToast('Account deleted successfully', 'success', 3000);
               loadAccounts(); // Refresh the list
             } catch (e) {
               Alert.alert('Error', 'Failed to delete account.');
@@ -878,7 +949,7 @@ const DashboardScreen = ({route, navigation}) => {
     }
     try {
       await renameAccount(selectedAccount.id, newAccountName.trim());
-      showToast('Account renamed successfully', 'success');
+      showToast('Account renamed successfully', 'success', 3000);
       loadAccounts(); // Refresh the list
     } catch (e) {
       Alert.alert('Error', 'Failed to rename account.');
@@ -1247,7 +1318,7 @@ const DashboardScreen = ({route, navigation}) => {
           // Refresh accounts list
           console.log('Account added successfully - refreshing list');
           loadAccounts();
-          showToast('Account created successfully', 'success');
+          showToast('Account created successfully', 'success', 3000);
         }}
       />
 
@@ -1284,52 +1355,93 @@ const DashboardScreen = ({route, navigation}) => {
                 {selectedAccount?.account_name}
               </Text>
             </View>
-            <TouchableOpacity
-              style={[
-                styles.contextMenuItem,
-                isMoveUpDisabled && styles.contextMenuItemDisabled,
-              ]}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
-              disabled={isMoveUpDisabled}
-              onPress={() => moveSelectedAccount('up')}>
-              <Icon
-                name="arrow-up"
-                size={22}
-                color={
-                  isMoveUpDisabled ? colors.text.light : colors.text.primary
-                }
-              />
-              <Text
+            {canMoveWithinType && (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.contextMenuItem,
+                    isMoveUpDisabled && styles.contextMenuItemDisabled,
+                  ]}
+                  hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
+                  disabled={isMoveUpDisabled}
+                  onPress={() => moveSelectedAccount('up')}>
+                  <Icon
+                    name="arrow-up"
+                    size={22}
+                    color={
+                      isMoveUpDisabled ? colors.text.light : colors.text.primary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.contextMenuItemText,
+                      isMoveUpDisabled && styles.contextMenuItemTextDisabled,
+                    ]}>
+                    Move Up
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.contextMenuItem,
+                    isMoveDownDisabled && styles.contextMenuItemDisabled,
+                  ]}
+                  hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
+                  disabled={isMoveDownDisabled}
+                  onPress={() => moveSelectedAccount('down')}>
+                  <Icon
+                    name="arrow-down"
+                    size={22}
+                    color={
+                      isMoveDownDisabled
+                        ? colors.text.light
+                        : colors.text.primary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.contextMenuItemText,
+                      isMoveDownDisabled &&
+                        styles.contextMenuItemTextDisabled,
+                    ]}>
+                    Move Down
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+            {selectedAccount?.account_type === 'earning' && (
+              <TouchableOpacity
                 style={[
-                  styles.contextMenuItemText,
-                  isMoveUpDisabled && styles.contextMenuItemTextDisabled,
-                ]}>
-                Move Up
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.contextMenuItem,
-                isMoveDownDisabled && styles.contextMenuItemDisabled,
-              ]}
-              hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
-              disabled={isMoveDownDisabled}
-              onPress={() => moveSelectedAccount('down')}>
-              <Icon
-                name="arrow-down"
-                size={22}
-                color={
-                  isMoveDownDisabled ? colors.text.light : colors.text.primary
-                }
-              />
-              <Text
-                style={[
-                  styles.contextMenuItemText,
-                  isMoveDownDisabled && styles.contextMenuItemTextDisabled,
-                ]}>
-                Move Down
-              </Text>
-            </TouchableOpacity>
+                  styles.contextMenuItem,
+                  Number(selectedAccount?.is_primary) === 1 &&
+                    styles.contextMenuItemDisabled,
+                ]}
+                hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
+                onPress={handleSetPrimary}
+                disabled={Number(selectedAccount?.is_primary) === 1}>
+                <Icon
+                  name="star-outline"
+                  size={22}
+                  color={
+                    Number(selectedAccount?.is_primary) === 1
+                      ? '#10B981'
+                      : colors.text.primary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.contextMenuItemText,
+                    Number(selectedAccount?.is_primary) === 1 &&
+                      styles.contextMenuItemTextSelected,
+                  ]}>
+                  {Number(selectedAccount?.is_primary) === 1
+                    ? 'Primary Account'
+                    : 'Set as Primary'}
+                </Text>
+                {Number(selectedAccount?.is_primary) === 1 && (
+                  <Icon name="checkmark" size={18} color="#10B981" />
+                )}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.contextMenuItem}
               hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
@@ -1400,33 +1512,31 @@ const DashboardScreen = ({route, navigation}) => {
         </View>
       </Modal>
 
-       {/* Setup Completion Popup */}
-       <Modal
-        visible={showSetupPopup}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={handleRemindLater}>
-        <View style={styles.setupModalOverlay}>
-          <View style={styles.setupModalContainer}>
-            <Text style={styles.setupModalTitle}>Complete Your Profile Setup</Text>
-            <Text style={styles.setupModalDescription}>
-              Please complete your profile to unlock all features and ensure data backup.
+      {/* Setup Completion Popup */}
+      <BottomSheet visible={showSetupPopup} onClose={handleRemindLater}>
+        <View style={styles.setupSheetContent}>
+          <Text style={styles.setupSheetTitle}>
+            Complete your basic details
+          </Text>
+          <Text style={styles.setupSheetDescription}>
+            Update your name and phone number to work smoothly with others.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.setupPrimaryButton}
+            onPress={handleGoToProfile}>
+            <Text style={styles.setupPrimaryButtonText}>
+              Update basic details
             </Text>
+          </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.setupPrimaryButton}
-              onPress={handleGoToProfile}>
-              <Text style={styles.setupPrimaryButtonText}>Go to Profile Settings</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.setupSecondaryButton}
-              onPress={handleRemindLater}>
-              <Text style={styles.setupSecondaryButtonText}>Remind Me Later</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={styles.setupSecondaryButton}
+            onPress={handleRemindLater}>
+            <Text style={styles.setupSecondaryButtonText}>Remind me later</Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </BottomSheet>
 
     </View>
   );
@@ -1880,6 +1990,10 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: fontWeight.medium,
   },
+  contextMenuItemTextSelected: {
+    color: '#10B981',
+    fontWeight: fontWeight.semibold,
+  },
   contextMenuItemTextDisabled: {
     color: colors.text.light,
   },
@@ -1945,32 +2059,18 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: 'bold',
   },
-  setupModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  setupSheetContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
   },
-  setupModalContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '85%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  setupModalTitle: {
+  setupSheetTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 12,
     textAlign: 'center',
   },
-  setupModalDescription: {
+  setupSheetDescription: {
     fontSize: 14,
     color: '#666',
     marginBottom: 24,
@@ -2005,3 +2105,4 @@ const styles = StyleSheet.create({
 });
 
 export default DashboardScreen;
+

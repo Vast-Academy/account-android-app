@@ -10,6 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { auth } from '../config/firebase';
 import { clearLocalData } from '../services/database';
@@ -19,6 +20,7 @@ const HomeScreen = ({ route, navigation }) => {
   const [user, setUser] = useState(null);
   const [showSetupPopup, setShowSetupPopup] = useState(false);
   const [popupDismissedThisSession, setPopupDismissedThisSession] = useState(false);
+  const currencySymbol = useCurrencySymbol();
 
   useEffect(() => {
     // Get user from params or AsyncStorage
@@ -134,7 +136,9 @@ const HomeScreen = ({ route, navigation }) => {
 
       <View style={styles.balanceCard}>
         <Text style={styles.balanceLabel}>Current Balance</Text>
-        <Text style={styles.balanceAmount}>₹ {user.balance || 0}</Text>
+        <Text style={styles.balanceAmount}>
+          {currencySymbol} {user.balance || 0}
+        </Text>
       </View>
 
       <View style={styles.actionsContainer}>

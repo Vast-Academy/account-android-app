@@ -167,11 +167,19 @@ const SetupScreen = ({ route, navigation }) => {
       const response = await completeSetup(firebaseUid, username, password);
 
       if (response.success) {
+        const normalizedUser = {
+          ...response.user,
+          currencySymbol:
+            response.user?.currencySymbol ||
+            response.user?.currency ||
+            response.user?.currency_symbol ||
+            '₹',
+        };
         // Save user data locally
-        saveUserData(response.user);
-        await AsyncStorage.setItem('user', JSON.stringify(response.user));
-        if (response.user?.firebaseUid) {
-          await AsyncStorage.setItem('firebaseUid', response.user.firebaseUid);
+        saveUserData(normalizedUser);
+        await AsyncStorage.setItem('user', JSON.stringify(normalizedUser));
+        if (normalizedUser?.firebaseUid) {
+          await AsyncStorage.setItem('firebaseUid', normalizedUser.firebaseUid);
         }
         if (backupAccountEmail) {
           await AsyncStorage.setItem('backup.accountEmail', backupAccountEmail);
@@ -183,7 +191,7 @@ const SetupScreen = ({ route, navigation }) => {
             text: 'OK',
             onPress: () =>
               navigation.replace('Home', {
-                user: response.user,
+                user: normalizedUser,
                 showTutorial: true,
               }),
           },

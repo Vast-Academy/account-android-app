@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
+import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import {
   initLedgerDatabase,
   createTransaction as createLedgerTransaction,
@@ -35,6 +36,7 @@ const LEDGER_TRANSFER_LAST_ACCOUNT_KEY = 'ledgerTransferLastAccountId';
 const LedgerContactDetailScreen = ({route, navigation}) => {
   const {contact} = route.params || {};
   const {showToast} = useToast();
+  const currencySymbol = useCurrencySymbol();
 
   const [transactions, setTransactions] = useState([]);
   const [balance, setBalance] = useState({
@@ -262,7 +264,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   };
 
   const formatCurrency = amount => {
-    return `₹ ${Math.abs(amount).toLocaleString('en-IN')}`;
+    return `${currencySymbol} ${Math.abs(amount).toLocaleString('en-IN')}`;
   };
 
   const formatSignedBalance = amount => {

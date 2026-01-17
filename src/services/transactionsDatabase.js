@@ -68,15 +68,23 @@ export const initTransactionsDatabase = () => {
 };
 
 // Create new transaction
-export const createTransaction = async (accountId, amount, remark) => {
+export const createTransaction = async (
+  accountId,
+  amount,
+  remark,
+  transactionDate = null
+) => {
   try {
     const db = getDB();
     const timestamp = Date.now();
+    const transactionTimestamp = Number.isFinite(transactionDate)
+      ? transactionDate
+      : timestamp;
 
     const result = db.execute(
       `INSERT INTO transactions (account_id, amount, remark, transaction_date, created_at)
        VALUES (?, ?, ?, ?, ?)`,
-      [accountId, amount, remark || '', timestamp, timestamp]
+      [accountId, amount, remark || '', transactionTimestamp, timestamp]
     );
 
     console.log('Transaction created successfully');

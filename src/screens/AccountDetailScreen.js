@@ -21,6 +21,8 @@ import {Picker} from '@react-native-picker/picker';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
+import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
+import DateTimePicker from '@react-native-community/datetimepicker/src/datetimepicker';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 import BottomSheet from '../components/BottomSheet';
@@ -143,6 +145,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     is_primary: 0,
   };
   const {showToast} = useToast();
+  const currencySymbol = useCurrencySymbol();
 
   const [amount, setAmount] = useState('');
   const [addNote, setAddNote] = useState('');
@@ -175,6 +178,9 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [transferAmount, setTransferAmount] = useState(0);
   const [amountFieldHeight, setAmountFieldHeight] = useState(0);
   const [amountAccountWidth, setAmountAccountWidth] = useState(0);
+  const [entryDate, setEntryDate] = useState(new Date());
+  const [showEntryDatePicker, setShowEntryDatePicker] = useState(false);
+  const [showEntryTimePicker, setShowEntryTimePicker] = useState(false);
   const [quickPeriod, setQuickPeriod] = useState('1month');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
@@ -276,6 +282,77 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
   }, [account.id]);
 
+  const canWithdrawAtTimestamp = useCallback(
+    (withdrawValue, timestamp) => {
+      if (!Number.isFinite(withdrawValue) || withdrawValue <= 0) {
+        return false;
+      }
+      if (!Number.isFinite(timestamp)) {
+        return false;
+      }
+      const newEntry = {
+        id: 'pending',
+        amount: -Math.abs(withdrawValue),
+        transaction_date: timestamp,
+        is_deleted: 0,
+      };
+      const timeline = [...transactions, newEntry]
+        .filter(entry => Number(entry?.is_deleted) !== 1)
+        .sort((a, b) => {
+          const timeDiff =
+            Number(a.transaction_date) - Number(b.transaction_date);
+          if (timeDiff !== 0) {
+            return timeDiff;
+          }
+          return String(a.id).localeCompare(String(b.id));
+        });
+
+      let running = 0;
+      for (const entry of timeline) {
+        running += Number(entry.amount) || 0;
+        if (running < 0) {
+          return false;
+        }
+      }
+      return true;
+    },
+    [transactions]
+  );
+
+  const canApplyAmountEdit = useCallback(
+    (transactionId, nextAmount) => {
+      if (!transactionId) {
+        return false;
+      }
+      if (!Number.isFinite(nextAmount)) {
+        return false;
+      }
+      const timeline = transactions
+        .filter(entry => Number(entry?.is_deleted) !== 1)
+        .map(entry =>
+          entry.id === transactionId ? {...entry, amount: nextAmount} : entry
+        )
+        .sort((a, b) => {
+          const timeDiff =
+            Number(a.transaction_date) - Number(b.transaction_date);
+          if (timeDiff !== 0) {
+            return timeDiff;
+          }
+          return String(a.id).localeCompare(String(b.id));
+        });
+
+      let running = 0;
+      for (const entry of timeline) {
+        running += Number(entry.amount) || 0;
+        if (running < 0) {
+          return false;
+        }
+      }
+      return true;
+    },
+    [transactions]
+  );
+
   useEffect(() => {
     initTransactionsDatabase();
     initRecurringDatabase();
@@ -366,6 +443,14 @@ const AccountDetailScreen = ({route, navigation}) => {
     };
     loadTransferAccounts();
   }, [withdrawModalVisible, withdrawMode, account.id]);
+
+  useEffect(() => {
+    if (addModalVisible || withdrawModalVisible) {
+      setEntryDate(new Date());
+      setShowEntryDatePicker(false);
+      setShowEntryTimePicker(false);
+    }
+  }, [addModalVisible, withdrawModalVisible]);
 
   useEffect(() => {
     const isAnyModalOpen =
@@ -530,6 +615,13 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
   };
 
+  const isFutureEntryDate = value => {
+    if (!(value instanceof Date)) {
+      return false;
+    }
+    return value.getTime() > Date.now();
+  };
+
   const handleAddEntry = async () => {
     // Validation
     if (!amount || parseFloat(amount) <= 0) {
@@ -542,10 +634,15 @@ const AccountDetailScreen = ({route, navigation}) => {
     setLoading(true);
     try {
       const amountValue = parseFloat(amount);
+      if (isFutureEntryDate(entryDate)) {
+        showToast('Future entry not allowed.', 'error');
+        return false;
+      }
+      const entryTimestamp = entryDate.getTime();
 
       if (scheduleType === 'once') {
         // Create immediate transaction
-        await createTransaction(account.id, amountValue, remark);
+        await createTransaction(account.id, amountValue, remark, entryTimestamp);
         showToast('Amount added successfully', 'success');
       } else {
         // Create recurring schedule
@@ -592,11 +689,23 @@ const AccountDetailScreen = ({route, navigation}) => {
     setLoading(true);
     try {
       const amountValue = Math.abs(parseFloat(withdrawAmount));
+      if (isFutureEntryDate(entryDate)) {
+        showToast('Future entry not allowed.', 'error');
+        return false;
+      }
+      const entryTimestamp = entryDate.getTime();
+      if (!canWithdrawAtTimestamp(amountValue, entryTimestamp)) {
+        showToast(
+          'Withdrawal not allowed. Balance was insufficient at that time.',
+          'error'
+        );
+        return false;
+      }
       if (amountValue > totalBalance) {
         showToast('Balance is low. Add amount first to withdraw.', 'error');
         return false;
       }
-      await createTransaction(account.id, -amountValue, remark);
+      await createTransaction(account.id, -amountValue, remark, entryTimestamp);
       showToast('Withdrawal recorded successfully', 'success');
 
       setWithdrawAmount('');
@@ -637,6 +746,10 @@ const AccountDetailScreen = ({route, navigation}) => {
     if (!targetAccount || !amountValue) {
       return;
     }
+    if (isFutureEntryDate(entryDate)) {
+      showToast('Future entry not allowed.', 'error');
+      return;
+    }
     const transferNote = withdrawNote.trim();
     const toRemark = transferNote
       ? `Transferred to ${targetAccount.account_name} - ${transferNote}`
@@ -646,15 +759,18 @@ const AccountDetailScreen = ({route, navigation}) => {
       : `Transferred from ${account.account_name}`;
     setLoading(true);
     try {
+      const entryTimestamp = entryDate.getTime();
       await createTransaction(
         account.id,
         -amountValue,
-        toRemark
+        toRemark,
+        entryTimestamp
       );
       await createTransaction(
         targetAccount.id,
         amountValue,
-        fromRemark
+        fromRemark,
+        entryTimestamp
       );
       setWithdrawAmount('');
       setWithdrawNote('');
@@ -685,6 +801,14 @@ const AccountDetailScreen = ({route, navigation}) => {
       remark.startsWith('requested to ') ||
       remark.startsWith('requested from ') ||
       remark.startsWith('requested by ')
+    );
+  };
+
+  const isActualTransferTransaction = txn => {
+    const remark = String(txn?.remark || '').trim().toLowerCase();
+    return (
+      remark.startsWith('transferred to ') ||
+      remark.startsWith('transferred from ')
     );
   };
 
@@ -822,6 +946,63 @@ const AccountDetailScreen = ({route, navigation}) => {
     return latest?.id ?? null;
   };
 
+  const canApplyAmountEditWithEntries = (entries, transactionId, nextAmount) => {
+    if (!transactionId) {
+      return false;
+    }
+    if (!Number.isFinite(nextAmount)) {
+      return false;
+    }
+    const timeline = entries
+      .filter(entry => Number(entry?.is_deleted) !== 1)
+      .map(entry =>
+        entry.id === transactionId ? {...entry, amount: nextAmount} : entry
+      )
+      .sort((a, b) => {
+        const timeDiff =
+          Number(a.transaction_date) - Number(b.transaction_date);
+        if (timeDiff !== 0) {
+          return timeDiff;
+        }
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+    let running = 0;
+    for (const entry of timeline) {
+      running += Number(entry.amount) || 0;
+      if (running < 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const canDeleteWithoutNegative = (entries, transactionId) => {
+    if (!transactionId) {
+      return false;
+    }
+    const timeline = entries
+      .filter(entry => Number(entry?.is_deleted) !== 1)
+      .filter(entry => entry.id !== transactionId)
+      .sort((a, b) => {
+        const timeDiff =
+          Number(a.transaction_date) - Number(b.transaction_date);
+        if (timeDiff !== 0) {
+          return timeDiff;
+        }
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+    let running = 0;
+    for (const entry of timeline) {
+      running += Number(entry.amount) || 0;
+      if (running < 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const canEditAmount = txn => {
     if (!txn) {
       return false;
@@ -833,7 +1014,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     if (!latestId || txn.id !== latestId) {
       return false;
     }
-    if (isTransferTransaction(txn)) {
+    if (isTransferTransaction(txn) && !isActualTransferTransaction(txn)) {
       return false;
     }
     const editCount = Number(txn.edit_count) || 0;
@@ -864,6 +1045,8 @@ const AccountDetailScreen = ({route, navigation}) => {
     setOptionsVisible(true);
   };
 
+  const isDeletedTransaction = txn => Number(txn?.is_deleted) === 1;
+
   const handleUpdateAmount = async () => {
     if (!selectedTransaction) {
       return;
@@ -892,6 +1075,47 @@ const AccountDetailScreen = ({route, navigation}) => {
     try {
       const nextAmount =
         Number(selectedTransaction.amount) < 0 ? -parsedAmount : parsedAmount;
+      const linkedTransfer = isActualTransferTransaction(selectedTransaction)
+        ? getLinkedExpensesTransaction(selectedTransaction)
+        : null;
+      if (isActualTransferTransaction(selectedTransaction)) {
+        if (!linkedTransfer) {
+          showToast(
+            'Linked transfer entry not found. Unable to edit amount.',
+            'error'
+          );
+          return;
+        }
+        const linkedEditCount = Number(linkedTransfer.edit_count) || 0;
+        if (linkedEditCount >= 3) {
+          showToast('Edit limit reached for linked entry.', 'error');
+          return;
+        }
+        const linkedNextAmount = -nextAmount;
+        const linkedTransactions = getTransactionsByAccount(
+          linkedTransfer.account_id
+        );
+        if (
+          !canApplyAmountEditWithEntries(
+            linkedTransactions,
+            linkedTransfer.id,
+            linkedNextAmount
+          )
+        ) {
+          showToast(
+            'Edit not allowed. Linked account balance was insufficient at that time.',
+            'error'
+          );
+          return;
+        }
+      }
+      if (!canApplyAmountEdit(selectedTransaction.id, nextAmount)) {
+        showToast(
+          'Edit not allowed. Balance was insufficient at that time.',
+          'error'
+        );
+        return;
+      }
       const currentHistory = parseEditHistory(selectedTransaction);
       const originalAbs = Math.abs(Number(selectedTransaction.amount) || 0);
       const nextAbs = Math.abs(nextAmount);
@@ -906,6 +1130,25 @@ const AccountDetailScreen = ({route, navigation}) => {
         JSON.stringify(nextHistory),
         editCount + 1
       );
+      if (isActualTransferTransaction(selectedTransaction) && linkedTransfer) {
+          const linkedNextAmount = -nextAmount;
+          const linkedHistory = parseEditHistory(linkedTransfer);
+          const linkedOriginalAbs = Math.abs(
+            Number(linkedTransfer.amount) || 0
+          );
+          const linkedNextAbs = Math.abs(linkedNextAmount);
+          const linkedNextHistory =
+            linkedHistory.length > 0
+              ? [...linkedHistory, linkedNextAbs]
+              : [linkedOriginalAbs, linkedNextAbs];
+          await updateTransactionAmount(
+            linkedTransfer.id,
+            linkedTransfer.account_id,
+            linkedNextAmount,
+            JSON.stringify(linkedNextHistory),
+            (Number(linkedTransfer.edit_count) || 0) + 1
+          );
+      }
       const remainingEdits = Math.max(0, 2 - editCount);
       showToast(`${remainingEdits} edits remaining.`, 'success');
       setEditAmountVisible(false);
@@ -940,7 +1183,57 @@ const AccountDetailScreen = ({route, navigation}) => {
   };
 
   const formatCurrency = value => {
-    return `\u20B9 ${value.toLocaleString('en-IN')}`;
+    return `${currencySymbol} ${value.toLocaleString('en-IN')}`;
+  };
+
+  const formatEntryDate = value => {
+    return value.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const formatEntryTime = value => {
+    return value.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const handleEntryDateChange = (event, selectedDate) => {
+    setShowEntryDatePicker(false);
+    if (event?.type === 'dismissed' || !selectedDate) {
+      return;
+    }
+    const updated = new Date(entryDate);
+    updated.setFullYear(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate()
+    );
+    updated.setSeconds(0, 0);
+    if (isFutureEntryDate(updated)) {
+      showToast('Future date not allowed.', 'error');
+      setEntryDate(new Date());
+      return;
+    }
+    setEntryDate(updated);
+  };
+
+  const handleEntryTimeChange = (event, selectedDate) => {
+    setShowEntryTimePicker(false);
+    if (event?.type === 'dismissed' || !selectedDate) {
+      return;
+    }
+    const updated = new Date(entryDate);
+    updated.setHours(selectedDate.getHours(), selectedDate.getMinutes(), 0, 0);
+    if (isFutureEntryDate(updated)) {
+      showToast('Future time not allowed.', 'error');
+      setEntryDate(new Date());
+      return;
+    }
+    setEntryDate(updated);
   };
 
   const formatDateTime = timestamp => {
@@ -1394,6 +1687,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     );
   };
 
+  const showEntryDateTime = scheduleType === 'once';
   const showDayPicker = scheduleType === 'weekly' || scheduleType === '2weeks';
   const showDatePicker = ['monthly', '2months', '3months', '6months'].includes(scheduleType);
 
@@ -1640,6 +1934,44 @@ const AccountDetailScreen = ({route, navigation}) => {
                 editable={!loading}
                 onLayout={focusAddAmountInput}
               />
+            {showEntryDateTime && (
+              <View style={styles.entryDateTimeRow}>
+                <TouchableOpacity
+                  style={styles.entryDateTimeButton}
+                  onPress={() => setShowEntryDatePicker(true)}>
+                  <Text style={styles.entryDateTimeLabel}>Date</Text>
+                  <Text style={styles.entryDateTimeValue}>
+                    {formatEntryDate(entryDate)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.entryDateTimeButton}
+                  onPress={() => setShowEntryTimePicker(true)}>
+                  <Text style={styles.entryDateTimeLabel}>Time</Text>
+                  <Text style={styles.entryDateTimeValue}>
+                    {formatEntryTime(entryDate)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {showEntryDatePicker && (
+              <DateTimePicker
+                value={entryDate}
+                mode="date"
+                display="default"
+                maximumDate={new Date()}
+                onChange={handleEntryDateChange}
+              />
+            )}
+            {showEntryTimePicker && (
+              <DateTimePicker
+                value={entryDate}
+                mode="time"
+                display="default"
+                maximumDate={new Date()}
+                onChange={handleEntryTimeChange}
+              />
+            )}
             <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
             <TextInput
               style={styles.modalNoteInput}
@@ -1930,6 +2262,42 @@ const AccountDetailScreen = ({route, navigation}) => {
                   editable={!loading}
                 />
               )}
+              <View style={styles.entryDateTimeRow}>
+                <TouchableOpacity
+                  style={styles.entryDateTimeButton}
+                  onPress={() => setShowEntryDatePicker(true)}>
+                  <Text style={styles.entryDateTimeLabel}>Date</Text>
+                  <Text style={styles.entryDateTimeValue}>
+                    {formatEntryDate(entryDate)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.entryDateTimeButton}
+                  onPress={() => setShowEntryTimePicker(true)}>
+                  <Text style={styles.entryDateTimeLabel}>Time</Text>
+                  <Text style={styles.entryDateTimeValue}>
+                    {formatEntryTime(entryDate)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {showEntryDatePicker && (
+                <DateTimePicker
+                  value={entryDate}
+                  mode="date"
+                  display="default"
+                  maximumDate={new Date()}
+                  onChange={handleEntryDateChange}
+                />
+              )}
+              {showEntryTimePicker && (
+                <DateTimePicker
+                  value={entryDate}
+                  mode="time"
+                  display="default"
+                  maximumDate={new Date()}
+                  onChange={handleEntryTimeChange}
+                />
+              )}
               <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
               <TextInput
                 style={styles.modalNoteInput}
@@ -2016,6 +2384,11 @@ const AccountDetailScreen = ({route, navigation}) => {
                     )}`
                   : 'Options'}
               </Text>
+              {isDeletedTransaction(selectedTransaction) && (
+                <Text style={styles.optionsSubtitle}>
+                  Deleted entry can’t be edited.
+                </Text>
+              )}
             </View>
             <TouchableOpacity
               style={[
@@ -2055,7 +2428,12 @@ const AccountDetailScreen = ({route, navigation}) => {
               </View>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.optionButton}
+              style={[
+                styles.optionButton,
+                !canEditRemark(selectedTransaction) &&
+                  styles.optionButtonDisabled,
+              ]}
+              disabled={!canEditRemark(selectedTransaction)}
               onPress={() => {
                 if (!selectedTransaction) {
                   return;
@@ -2071,9 +2449,20 @@ const AccountDetailScreen = ({route, navigation}) => {
                 <Icon
                   name="chatbubble-ellipses-outline"
                   size={20}
-                  color={colors.text.primary}
+                  color={
+                    canEditRemark(selectedTransaction)
+                      ? colors.text.primary
+                      : colors.text.light
+                  }
                 />
-                <Text style={styles.optionText}>Edit Remark</Text>
+                <Text
+                  style={[
+                    styles.optionText,
+                    !canEditRemark(selectedTransaction) &&
+                      styles.optionTextDisabled,
+                  ]}>
+                  Edit Remark
+                </Text>
               </View>
             </TouchableOpacity>
             <TouchableOpacity
@@ -2104,11 +2493,37 @@ const AccountDetailScreen = ({route, navigation}) => {
                         );
                         closeOptionsMenu(true);
                         try {
+                          if (
+                            !canDeleteWithoutNegative(
+                              transactions,
+                              selectedTransaction.id
+                            )
+                          ) {
+                            showToast(
+                              'Delete not allowed. Balance would go negative.',
+                              'error'
+                            );
+                            return;
+                          }
                           if (isLockedTransaction(selectedTransaction)) {
                             const linked = getLinkedExpensesTransaction(
                               selectedTransaction
                             );
                             if (linked) {
+                              const linkedTransactions =
+                                getTransactionsByAccount(linked.account_id);
+                              if (
+                                !canDeleteWithoutNegative(
+                                  linkedTransactions,
+                                  linked.id
+                                )
+                              ) {
+                                showToast(
+                                  'Delete not allowed. Linked account balance would go negative.',
+                                  'error'
+                                );
+                                return;
+                              }
                               const linkedHistory = buildDeleteHistory(linked);
                               await deleteTransaction(
                                 linked.id,
@@ -2707,6 +3122,30 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     marginBottom: spacing.sm,
   },
+  entryDateTimeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  entryDateTimeButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: colors.white,
+  },
+  entryDateTimeLabel: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginBottom: 4,
+  },
+  entryDateTimeValue: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+  },
   modalNoteLabel: {
     fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
@@ -2950,6 +3389,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.large,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
+    textAlign: 'center',
+  },
+  optionsSubtitle: {
+    marginTop: 4,
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   optionButton: {

@@ -60,6 +60,7 @@ const MainTabNavigator = ({route}) => {
         ...(user || {}),
         ...updates,
       };
+      setUser(updatedUser);
 
       const currentUser = auth().currentUser;
       if (currentUser) {
@@ -69,7 +70,6 @@ const MainTabNavigator = ({route}) => {
         });
       }
 
-      setUser(updatedUser);
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
       saveUserData(updatedUser);
       return {success: true};

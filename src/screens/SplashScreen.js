@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { checkAuthStatus } from '../utils/tokenManager';
 import { isSetupComplete } from '../services/userSetup'; // Import isSetupComplete
 
@@ -13,6 +13,28 @@ const SplashScreen = ({ navigation }) => {
       const authStatus = await checkAuthStatus();
 
       if (authStatus.isAuthenticated) {
+        const userData = authStatus.user || {};
+        const name = String(userData?.displayName || userData?.name || '').trim();
+        const phone = String(
+          userData?.phoneNumber || userData?.mobile || ''
+        ).trim();
+        const currency = String(
+          userData?.currencySymbol ||
+            userData?.currency ||
+            userData?.currency_symbol ||
+            ''
+        ).trim();
+
+        if (!currency) {
+          navigation.replace('CurrencySetup', { user: userData });
+          return;
+        }
+
+        if (!name || !phone) {
+          navigation.replace('ProfileSetup', { user: userData });
+          return;
+        }
+
         // Check if initial setup is complete (e.g., first earning account created)
         const setupCompleted = isSetupComplete();
 
@@ -40,8 +62,9 @@ const SplashScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Account App</Text>
-      <Text style={styles.subtitle}>Your Personal Finance Manager</Text>
+      <Image source={require('../../icon.png')} style={styles.logo} />
+      <Text style={styles.title}>Savingo</Text>
+      <Text style={styles.subtitle}>Your Personal Money Management App</Text>
       <ActivityIndicator
         size="large"
         color="#007AFF"
@@ -63,6 +86,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#007AFF',
     marginBottom: 10,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: 16,
+    resizeMode: 'contain',
   },
   subtitle: {
     fontSize: 14,

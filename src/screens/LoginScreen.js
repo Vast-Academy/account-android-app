@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { auth } from '../config/firebase';
-import { googleSignIn } from '../services/api';
+import { googleSignIn, getUserDetails } from '../services/api';
 import { saveUserData, initDatabase } from '../services/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveFirebaseToken } from '../utils/tokenManager';
@@ -19,6 +19,39 @@ import RNRestart from 'react-native-restart';
 
 const LoginScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
+  const normalizeUser = rawUser => {
+    const normalized = {...rawUser};
+    const name = String(
+      normalized.displayName || normalized.name || ''
+    ).trim();
+    const phone = String(
+      normalized.phoneNumber || normalized.mobile || ''
+    ).trim();
+    const currencySymbol =
+      normalized.currencySymbol ||
+      normalized.currency ||
+      normalized.currency_symbol ||
+      '';
+    if (!normalized.displayName && normalized.name) {
+      normalized.displayName = normalized.name;
+    }
+    if (!normalized.phoneNumber && normalized.mobile) {
+      normalized.phoneNumber = normalized.mobile;
+    }
+    if (!normalized.currencySymbol && currencySymbol) {
+      normalized.currencySymbol = currencySymbol;
+    }
+    if (
+      normalized.setupComplete === undefined ||
+      normalized.setupComplete === null
+    ) {
+      const hasCurrency = Boolean(currencySymbol);
+      if (name && phone && hasCurrency) {
+        normalized.setupComplete = true;
+      }
+    }
+    return normalized;
+  };
 
   // Initialize database on mount
   React.useEffect(() => {
@@ -93,25 +126,57 @@ const LoginScreen = ({ navigation }) => {
       if (response.success) {
         await AsyncStorage.setItem('backup.restorePending', 'true');
 
-        // Save user data locally
-        saveUserData(response.user);
-        await AsyncStorage.setItem('user', JSON.stringify(response.user));
+        let resolvedUser = response.user;
+        try {
+          const details = await getUserDetails(firebaseIdToken);
+          if (details?.user) {
+            resolvedUser = details.user;
+          }
+        } catch (error) {
+          console.warn('Failed to refresh user details:', error);
+        }
+        const normalizedUser = normalizeUser(resolvedUser);
 
-        if (response.user?.firebaseUid) {
-          await AsyncStorage.setItem('firebaseUid', response.user.firebaseUid);
+        // Save user data locally
+        saveUserData(normalizedUser);
+        await AsyncStorage.setItem('user', JSON.stringify(normalizedUser));
+
+        if (normalizedUser?.firebaseUid) {
+          await AsyncStorage.setItem('firebaseUid', normalizedUser.firebaseUid);
         }
 
         // Auto-set backup email from Google Sign-In (cannot be changed)
-        if (response.user?.email) {
-          await AsyncStorage.setItem('backup.accountEmail', response.user.email);
+        if (normalizedUser?.email) {
+          await AsyncStorage.setItem('backup.accountEmail', normalizedUser.email);
           await AsyncStorage.setItem('backup.enabled', 'true');
         }
 
-        // Check for restore, then navigate to Home (Dashboard)
-        const restored = await promptRestoreIfAvailable(response.user);
+        const hasCurrency = Boolean(
+          normalizedUser.currencySymbol ||
+            normalizedUser.currency ||
+            normalizedUser.currency_symbol
+        );
+        const hasBasicDetails = Boolean(
+          String(normalizedUser.displayName || normalizedUser.name || '').trim()
+        ) && Boolean(
+          String(
+            normalizedUser.phoneNumber || normalizedUser.mobile || ''
+          ).trim()
+        );
+
+        // Check for restore, then navigate
+        const restored = await promptRestoreIfAvailable(normalizedUser);
         if (!restored) {
           await AsyncStorage.setItem('backup.restorePending', 'false');
-          navigation.replace('Home', { user: response.user });
+          if (!hasCurrency) {
+            navigation.replace('CurrencySetup', { user: normalizedUser });
+            return;
+          }
+          if (!hasBasicDetails) {
+            navigation.replace('ProfileSetup', { user: normalizedUser });
+            return;
+          }
+          navigation.replace('Home', { user: normalizedUser });
         }
       }
     } catch (error) {
@@ -214,7 +279,7 @@ const LoginScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <View style={styles.innerContainer}>
-        <Text style={styles.title}>Account App</Text>
+        <Text style={styles.title}>Savingo</Text>
         <Text style={styles.subtitle}>Welcome Back!</Text>
         <Text style={styles.description}>Sign in to continue</Text>
 
@@ -321,3 +386,7 @@ const styles = StyleSheet.create({
 });
 
 export default LoginScreen;
+
+
+
+
