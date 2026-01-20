@@ -1,7 +1,9 @@
 import React, { useEffect, useCallback } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, Image } from 'react-native';
-import { checkAuthStatus } from '../utils/tokenManager';
-import { isSetupComplete } from '../services/userSetup'; // Import isSetupComplete
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { checkAuthStatus, getFirebaseToken } from '../utils/tokenManager';
+import { getUserDetails } from '../services/api';
+import { isSetupComplete } from '../services/userSetup';
 
 const SplashScreen = ({ navigation }) => {
   const checkAuthentication = useCallback(async () => {
@@ -13,7 +15,27 @@ const SplashScreen = ({ navigation }) => {
       const authStatus = await checkAuthStatus();
 
       if (authStatus.isAuthenticated) {
-        const userData = authStatus.user || {};
+        let userData = authStatus.user || {};
+
+        // Fetch fresh user data from backend to ensure we have latest profile info
+        try {
+          const token = await getFirebaseToken();
+          if (token) {
+            const response = await getUserDetails(token);
+            if (response?.success && response?.user) {
+              userData = {
+                ...userData,
+                ...response.user,
+              };
+              // Update local storage with fresh data from backend
+              await AsyncStorage.setItem('user', JSON.stringify(userData));
+            }
+          }
+        } catch (fetchError) {
+          console.warn('Could not refresh user data from backend:', fetchError);
+          // Continue with cached data if backend fetch fails
+        }
+
         const name = String(userData?.displayName || userData?.name || '').trim();
         const phone = String(
           userData?.phoneNumber || userData?.mobile || ''
@@ -40,10 +62,10 @@ const SplashScreen = ({ navigation }) => {
 
         if (!setupCompleted) {
           // User is logged in but setup not complete, go to Home with tutorial flag
-          navigation.replace('Home', { user: authStatus.user, showTutorial: true });
+          navigation.replace('Home', { user: userData, showTutorial: true });
         } else {
           // User is logged in and setup complete, go to Home normally
-          navigation.replace('Home', { user: authStatus.user, showTutorial: false });
+          navigation.replace('Home', { user: userData, showTutorial: false });
         }
       } else {
         // User not logged in, go to Login

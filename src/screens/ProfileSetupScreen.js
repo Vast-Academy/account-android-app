@@ -75,7 +75,6 @@ const ProfileSetupScreen = ({navigation, route}) => {
       const response = await updateProfile(firebaseUid, {
         displayName: displayName.trim(),
         mobile: phoneNumber.trim(),
-        dob: storedUser?.dob || null,
         gender: storedUser?.gender || null,
         occupation: storedUser?.occupation || null,
         currencySymbol: storedUser?.currencySymbol || null,

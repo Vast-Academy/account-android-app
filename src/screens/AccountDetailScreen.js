@@ -732,6 +732,18 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
 
     const amountValue = Math.abs(parseFloat(withdrawAmount));
+    if (isFutureEntryDate(entryDate)) {
+      showToast('Future entry not allowed.', 'error');
+      return false;
+    }
+    const entryTimestamp = entryDate.getTime();
+    if (!canWithdrawAtTimestamp(amountValue, entryTimestamp)) {
+      showToast(
+        'Transfer not allowed. Balance was insufficient at that time.',
+        'error'
+      );
+      return false;
+    }
     if (amountValue > totalBalance) {
       showToast('Balance is low. Add amount first to withdraw.', 'error');
       return false;
@@ -1638,7 +1650,6 @@ const AccountDetailScreen = ({route, navigation}) => {
                       style={[
                         styles.chatAmount,
                         Number(txn.amount) < 0 && styles.chatAmountDebit,
-                        isTransfer && styles.chatAmountTransfer,
                         isDeleted && styles.chatAmountDeleted,
                       ]}>
                       {(Number(txn.amount) < 0 ? '-' : '+') +

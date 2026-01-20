@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {useFocusEffect} from '@react-navigation/native';
 import {
   View,
@@ -236,7 +236,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const [profileVisible, setProfileVisible] = React.useState(false);
   const [draftName, setDraftName] = React.useState('');
   const [draftPhoto, setDraftPhoto] = React.useState('');
-  const [draftDob, setDraftDob] = React.useState('');
   const [draftPhoneNumber, setDraftPhoneNumber] = React.useState('');
   const [draftGender, setDraftGender] = React.useState('');
   const [occupationChoice, setOccupationChoice] = React.useState('');
@@ -423,7 +422,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     }
     setDraftName(profileUser?.displayName || profileUser?.name || '');
     setDraftPhoto(normalizeImageUri(profileUser?.photoURL || ''));
-    setDraftDob(profileUser?.dob || '');
     setDraftPhoneNumber(
       profileUser?.phoneNumber || profileUser?.mobile || ''
     );
@@ -521,7 +519,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       const response = await updateProfile(firebaseUid, {
         displayName: draftName.trim(),
         mobile: draftPhoneNumber.trim() || null,
-        dob: draftDob.trim() || null,
         gender: draftGender || null,
         occupation: occupationValue || null,
         setupComplete: true, // Mark setup as complete
@@ -585,8 +582,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     const photoChanged =
       normalizeImageUri(draftPhoto || '') !==
       normalizeImageUri(currentUser?.photoURL || '');
-    const dobChanged =
-      draftDob.trim() !== String(currentUser?.dob || '').trim();
     const phoneChanged =
       draftPhoneNumber.trim() !== String(currentUser?.phoneNumber || '').trim();
     const genderChanged =
@@ -596,7 +591,6 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
     return (
       nameChanged ||
       photoChanged ||
-      dobChanged ||
       phoneChanged ||
       genderChanged ||
       occupationChanged
@@ -650,6 +644,14 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       onPress: () => {
         skipNextSlideInRef.current = true;
         navigation.navigate('Settings');
+      },
+    },
+    {
+      id: 'notification-settings',
+      title: 'Notification Settings',
+      icon: 'notifications-outline',
+      onPress: () => {
+        navigation.navigate('NotificationSettings');
       },
     },
     {
@@ -777,6 +779,9 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 onPress={item.onPress}>
                 <Icon name={item.icon} size={24} color={colors.text.primary} />
                 <Text style={styles.menuText}>{item.title}</Text>
+                {item.subtitle && (
+                  <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
+                )}
                 <Icon
                   name="chevron-forward"
                   size={20}
@@ -1083,6 +1088,11 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     marginLeft: spacing.md,
   },
+  menuSubtitle: {
+    fontSize: fontSize.regular,
+    color: colors.text.secondary,
+    marginRight: spacing.sm,
+  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1296,11 +1306,3 @@ const styles = StyleSheet.create({
 });
 
 export default MoreScreen;
-
-
-
-
-
-
-
-

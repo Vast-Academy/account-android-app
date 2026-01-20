@@ -10,6 +10,7 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/context/ToastContext';
 import ToastContainer from './src/components/ToastContainer';
+import './src/services/NotificationService';
 
 function App() {
   useEffect(() => {
