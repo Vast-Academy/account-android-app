@@ -1,5 +1,6 @@
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import RNFS from 'react-native-fs';
+import RNBlobUtil from 'react-native-blob-util';
 
 const DRIVE_BASE_URL = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
@@ -81,58 +82,88 @@ export const uploadAppDataFile = async ({
   fileName,
   mimeType = 'application/zip',
   existingFileId = null,
+  onProgress = null,
 }) => {
-  const boundary = `backup_${Date.now()}`;
-  const fileBase64 = await RNFS.readFile(filePath, 'base64');
+  const token = await getAccessToken();
+  if (!token) {
+    throw new Error('Missing Google access token');
+  }
+  const stat = await RNFS.stat(filePath);
+  const fileSize = Number(stat?.size) || 0;
   const metadata = {
     name: fileName,
     mimeType,
     parents: ['appDataFolder'],
   };
 
-  const body =
-    `--${boundary}\r\n` +
-    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-    `${JSON.stringify(metadata)}\r\n` +
-    `--${boundary}\r\n` +
-    `Content-Type: ${mimeType}\r\n` +
-    'Content-Transfer-Encoding: base64\r\n\r\n' +
-    `${fileBase64}\r\n` +
-    `--${boundary}--`;
+  const getLocationHeader = response => {
+    const headers = response?.info?.().headers || {};
+    const candidates = Object.entries(headers);
+    const match = candidates.find(
+      ([key]) => key.toLowerCase() === 'location'
+    );
+    return match ? match[1] : null;
+  };
+
+  const uploadToSession = async sessionUrl => {
+    const response = await RNBlobUtil.fetch(
+      'PUT',
+      sessionUrl,
+      {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': mimeType,
+        'Content-Length': String(fileSize),
+      },
+      RNBlobUtil.wrap(filePath),
+    ).uploadProgress({interval: 250}, (written, total) => {
+      if (onProgress) {
+        onProgress(written, total || fileSize);
+      }
+    });
+    return response.json();
+  };
 
   if (existingFileId) {
     const updateMetadata = {
       name: metadata.name,
       mimeType: metadata.mimeType,
     };
-    const updateUrl = `${DRIVE_UPLOAD_URL}/${existingFileId}?uploadType=multipart`;
-    const response = await driveFetch(updateUrl, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': `multipart/related; boundary=${boundary}`,
+    const updateUrl = `${DRIVE_UPLOAD_URL}/${existingFileId}?uploadType=resumable`;
+    const sessionResponse = await RNBlobUtil.fetch(
+      'PATCH',
+      updateUrl,
+      {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': mimeType,
+        'X-Upload-Content-Length': String(fileSize),
       },
-      body:
-        `--${boundary}\r\n` +
-        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-        `${JSON.stringify(updateMetadata)}\r\n` +
-        `--${boundary}\r\n` +
-        `Content-Type: ${mimeType}\r\n` +
-        'Content-Transfer-Encoding: base64\r\n\r\n' +
-        `${fileBase64}\r\n` +
-        `--${boundary}--`,
-    });
-    return response.json();
+      JSON.stringify(updateMetadata),
+    );
+    const sessionUrl = getLocationHeader(sessionResponse);
+    if (!sessionUrl) {
+      throw new Error('Missing resumable upload URL');
+    }
+    return uploadToSession(sessionUrl);
   }
 
-  const createUrl = `${DRIVE_UPLOAD_URL}?uploadType=multipart`;
-  const response = await driveFetch(createUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': `multipart/related; boundary=${boundary}`,
+  const createUrl = `${DRIVE_UPLOAD_URL}?uploadType=resumable`;
+  const sessionResponse = await RNBlobUtil.fetch(
+    'POST',
+    createUrl,
+    {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Upload-Content-Type': mimeType,
+      'X-Upload-Content-Length': String(fileSize),
     },
-    body,
-  });
-  return response.json();
+    JSON.stringify(metadata),
+  );
+  const sessionUrl = getLocationHeader(sessionResponse);
+  if (!sessionUrl) {
+    throw new Error('Missing resumable upload URL');
+  }
+  return uploadToSession(sessionUrl);
 };
 
 export const downloadAppDataFile = async (fileId, destinationPath) => {

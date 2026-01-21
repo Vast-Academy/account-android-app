@@ -24,6 +24,7 @@ export const initTransactionsDatabase = () => {
         account_id INTEGER NOT NULL,
         amount REAL NOT NULL,
         remark TEXT,
+        image_uri TEXT,
         edit_history TEXT,
         edit_count INTEGER DEFAULT 0,
         is_deleted INTEGER DEFAULT 0,
@@ -41,6 +42,11 @@ export const initTransactionsDatabase = () => {
     }
     try {
       db.execute('ALTER TABLE transactions ADD COLUMN edit_count INTEGER DEFAULT 0');
+    } catch (e) {
+      // Column already exists, ignore
+    }
+    try {
+      db.execute('ALTER TABLE transactions ADD COLUMN image_uri TEXT');
     } catch (e) {
       // Column already exists, ignore
     }
@@ -72,7 +78,8 @@ export const createTransaction = async (
   accountId,
   amount,
   remark,
-  transactionDate = null
+  transactionDate = null,
+  imageUri = null
 ) => {
   try {
     const db = getDB();
@@ -82,9 +89,16 @@ export const createTransaction = async (
       : timestamp;
 
     const result = db.execute(
-      `INSERT INTO transactions (account_id, amount, remark, transaction_date, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [accountId, amount, remark || '', transactionTimestamp, timestamp]
+      `INSERT INTO transactions (account_id, amount, remark, image_uri, transaction_date, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        accountId,
+        amount,
+        remark || '',
+        imageUri || '',
+        transactionTimestamp,
+        timestamp,
+      ]
     );
 
     console.log('Transaction created successfully');

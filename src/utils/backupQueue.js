@@ -70,8 +70,16 @@ export const queueBackupFromStorage = async (
   }
   const firebaseUid = await AsyncStorage.getItem('firebaseUid');
   const accountEmail = await AsyncStorage.getItem('backup.accountEmail');
+  const includeReceipts = await AsyncStorage.getItem('backup.includeReceipts');
   if (!accountEmail) {
     return;
   }
-  return queueBackup({firebaseUid, accountEmail}, debounceMs);
+  return queueBackup(
+    {
+      firebaseUid,
+      accountEmail,
+      includeReceipts: includeReceipts !== 'false',
+    },
+    debounceMs
+  );
 };

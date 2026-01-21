@@ -15,10 +15,17 @@ import {
   Easing,
   Keyboard,
   InteractionManager,
+  PermissionsAndroid,
+  Platform,
+  Image, // Added Image import
 } from 'react-native';
+import ImagePicker from 'react-native-image-crop-picker';
+import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {Picker} from '@react-native-picker/picker';
 import Icon from 'react-native-vector-icons/Ionicons';
+import RNBlobUtil from 'react-native-blob-util';
+import ImageViewer from 'react-native-image-zoom-viewer';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
@@ -138,6 +145,51 @@ const tintWithWhite = (hex, whiteRatio = 0.9) => {
   return `#${toHex(mix(red))}${toHex(mix(green))}${toHex(mix(blue))}`;
 };
 
+const normalizeImageUri = uri => {
+  if (!uri) {
+    return '';
+  }
+  if (
+    uri.startsWith('http://') ||
+    uri.startsWith('https://') ||
+    uri.startsWith('file://') ||
+    uri.startsWith('content://')
+  ) {
+    return uri;
+  }
+  return `file://${uri}`;
+};
+
+const stripFileScheme = uri => {
+  if (!uri) {
+    return '';
+  }
+  return uri.startsWith('file://') ? uri.replace('file://', '') : uri;
+};
+
+const getFileExtension = path => {
+  if (!path) {
+    return 'jpg';
+  }
+  const cleanPath = stripFileScheme(path);
+  const lastDot = cleanPath.lastIndexOf('.');
+  if (lastDot === -1) {
+    return 'jpg';
+  }
+  return cleanPath.slice(lastDot + 1) || 'jpg';
+};
+
+const getMimeType = extension => {
+  const ext = String(extension || '').toLowerCase();
+  if (ext === 'png') {
+    return 'image/png';
+  }
+  if (ext === 'webp') {
+    return 'image/webp';
+  }
+  return 'image/jpeg';
+};
+
 const AccountDetailScreen = ({route, navigation}) => {
   const account = route?.params?.account || {
     id: null,
@@ -185,6 +237,10 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
   const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
+  const [addReceiptSheetVisible, setAddReceiptSheetVisible] = useState(false);
+  const [withdrawReceiptUri, setWithdrawReceiptUri] = useState('');
+  const [receiptPreviewVisible, setReceiptPreviewVisible] = useState(false);
+  const [receiptPreviewUri, setReceiptPreviewUri] = useState('');
   const [bottomSheetContent, setBottomSheetContent] = useState(null);
   const [availableYears, setAvailableYears] = useState([]);
   const [filteredAdded, setFilteredAdded] = useState(0);
@@ -265,6 +321,178 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
     Animated.sequence(steps).start();
   }, [defaultPulse]);
+
+  const ensureReceiptsDir = useCallback(async () => {
+    const receiptsDir = `${RNFS.DocumentDirectoryPath}/receipts`;
+    const exists = await RNFS.exists(receiptsDir);
+    if (!exists) {
+      await RNFS.mkdir(receiptsDir);
+    }
+    return receiptsDir;
+  }, []);
+
+  const persistReceiptImage = useCallback(
+    async sourcePath => {
+      if (!sourcePath) {
+        return '';
+      }
+      const receiptsDir = await ensureReceiptsDir();
+      const extension = getFileExtension(sourcePath);
+      const fileName = `receipt_${Date.now()}.${extension}`;
+      const destination = `${receiptsDir}/${fileName}`;
+      await RNFS.copyFile(stripFileScheme(sourcePath), destination);
+      return destination;
+    },
+    [ensureReceiptsDir],
+  );
+
+  const openReceiptPreview = useCallback(uri => {
+    if (!uri) {
+      return;
+    }
+    setReceiptPreviewUri(uri);
+    setReceiptPreviewVisible(true);
+  }, []);
+
+  const closeReceiptPreview = useCallback(() => {
+    setReceiptPreviewVisible(false);
+    setReceiptPreviewUri('');
+  }, []);
+
+  const handlePickReceiptImage = useCallback(
+    async source => {
+      try {
+        if (Platform.OS === 'android') {
+          const permission =
+            source === 'camera'
+              ? PermissionsAndroid.PERMISSIONS.CAMERA
+              : Platform.Version >= 33
+              ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+              : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+          const hasPermission = await PermissionsAndroid.check(permission);
+          if (!hasPermission) {
+            const status = await PermissionsAndroid.request(permission, {
+              title: 'Permission required',
+              message:
+                source === 'camera'
+                  ? 'Allow camera access to capture bill photos.'
+                  : 'Allow access to photos to attach bill images.',
+              buttonPositive: 'Allow',
+              buttonNegative: 'Deny',
+            });
+            if (status !== PermissionsAndroid.RESULTS.GRANTED) {
+              showToast('Permission denied.', 'error');
+              return;
+            }
+          }
+        }
+        const pickerOptions = {
+          mediaType: 'photo',
+          compressImageQuality: 0.5,
+          compressImageMaxWidth: 1200,
+          compressImageMaxHeight: 1200,
+        };
+        const result =
+          source === 'camera'
+            ? await ImagePicker.openCamera(pickerOptions)
+            : await ImagePicker.openPicker(pickerOptions);
+        if (result?.path) {
+          setWithdrawReceiptUri(result.path);
+        }
+      } catch (error) {
+        if (error?.code === 'E_PICKER_CANCELLED') {
+          return;
+        }
+        console.error('Failed to pick receipt image:', error);
+        Alert.alert('Error', 'Failed to open image picker.');
+      }
+    },
+    [showToast],
+  );
+
+  const handleAddReceipt = useCallback(() => {
+    setAddReceiptSheetVisible(true);
+  }, []);
+
+  const handleRemoveReceipt = useCallback(() => {
+    setWithdrawReceiptUri('');
+  }, []);
+
+  const requestDownloadPermission = useCallback(async () => {
+    if (Platform.OS !== 'android' || Platform.Version >= 29) {
+      return true;
+    }
+    const status = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+      {
+        title: 'Storage permission required',
+        message: 'Allow storage access to save bill photos to Downloads.',
+        buttonPositive: 'Allow',
+        buttonNegative: 'Deny',
+      }
+    );
+    return status === PermissionsAndroid.RESULTS.GRANTED;
+  }, []);
+
+  const downloadReceiptToDownloads = useCallback(
+    async uri => {
+      if (!uri) {
+        return;
+      }
+      if (Platform.OS !== 'android') {
+        showToast('Download not supported on this device.', 'error');
+        return;
+      }
+      const sourcePath = stripFileScheme(uri);
+      const extension = getFileExtension(sourcePath);
+      const fileName = `savingo_${Date.now()}.${extension}`;
+      const mimeType = getMimeType(extension);
+      try {
+        if (Platform.Version >= 29 && RNBlobUtil.MediaCollection?.copyToMediaStore) {
+          await RNBlobUtil.MediaCollection.copyToMediaStore(
+            {
+              name: fileName,
+              parentFolder: 'Download',
+              mimeType,
+            },
+            'Download',
+            sourcePath
+          );
+        } else {
+          const permitted = await requestDownloadPermission();
+          if (!permitted) {
+            showToast('Storage permission denied.', 'error');
+            return;
+          }
+          const destPath = `${RNBlobUtil.fs.dirs.DownloadDir}/${fileName}`;
+          await RNBlobUtil.fs.cp(sourcePath, destPath);
+        }
+        showToast('Saved to Download.', 'success');
+      } catch (error) {
+        console.error('Failed to download receipt:', error);
+        showToast('Failed to download image.', 'error');
+      }
+    },
+    [requestDownloadPermission, showToast]
+  );
+
+  const deleteReceiptFileIfPossible = useCallback(async uri => {
+    if (!uri) {
+      return;
+    }
+    const path = stripFileScheme(uri);
+    if (!path || !path.startsWith(RNFS.DocumentDirectoryPath)) {
+      return;
+    }
+    try {
+      const exists = await RNFS.exists(path);
+      if (exists) {
+        await RNFS.unlink(path);
+      }
+    } catch (error) {
+      console.warn('Failed to delete receipt image:', error);
+    }
+  }, []);
   const loadTransactions = useCallback(() => {
     if (!account.id) {
       setTransactions([]);
@@ -408,11 +636,18 @@ const AccountDetailScreen = ({route, navigation}) => {
       setWithdrawMode(null);
       setWithdrawAmount('');
       setWithdrawNote('');
+      setWithdrawReceiptUri('');
       setTransferSelectVisible(false);
       clearPulseAnimation();
       setHasDefaultPrompted(false);
     }
   }, [withdrawModalVisible, withdrawDefaultMode, clearPulseAnimation]);
+
+  useEffect(() => {
+    if (withdrawMode === 'transfer') {
+      setWithdrawReceiptUri('');
+    }
+  }, [withdrawMode]);
 
   useEffect(() => {
     if (!withdrawModalVisible || withdrawMode !== 'transfer') {
@@ -705,11 +940,22 @@ const AccountDetailScreen = ({route, navigation}) => {
         showToast('Balance is low. Add amount first to withdraw.', 'error');
         return false;
       }
-      await createTransaction(account.id, -amountValue, remark, entryTimestamp);
+      let receiptPath = '';
+      if (withdrawReceiptUri) {
+        try {
+          receiptPath = await persistReceiptImage(withdrawReceiptUri);
+        } catch (error) {
+          console.error('Failed to save receipt image:', error);
+          showToast('Failed to save bill photo.', 'error');
+          return false;
+        }
+      }
+      await createTransaction(account.id, -amountValue, remark, entryTimestamp, receiptPath);
       showToast('Withdrawal recorded successfully', 'success');
 
       setWithdrawAmount('');
       setWithdrawNote('');
+      setWithdrawReceiptUri('');
       loadTransactions();
       return true;
     } catch (error) {
@@ -786,6 +1032,7 @@ const AccountDetailScreen = ({route, navigation}) => {
       );
       setWithdrawAmount('');
       setWithdrawNote('');
+      setWithdrawReceiptUri('');
       setTransferAmount(0);
       setTransferSelectVisible(false);
       setTransferTarget(targetAccount);
@@ -1530,6 +1777,40 @@ const AccountDetailScreen = ({route, navigation}) => {
     return null;
   };
 
+  const renderAddReceiptSheet = () => {
+    return (
+      <View style={styles.receiptSheetContainer}>
+        <Text style={styles.receiptSheetTitle}>Attach Bill Photo</Text>
+        <Text style={styles.receiptSheetSubtitle}>Choose a source</Text>
+        <View style={styles.receiptSheetOptions}>
+          <TouchableOpacity
+            style={styles.receiptSheetOption}
+            onPress={() => {
+              setAddReceiptSheetVisible(false);
+              handlePickReceiptImage('camera');
+            }}>
+            <Icon name="camera-outline" size={32} color={colors.primary} />
+            <Text style={styles.receiptSheetOptionText}>Camera</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.receiptSheetOption}
+            onPress={() => {
+              setAddReceiptSheetVisible(false);
+              handlePickReceiptImage('gallery');
+            }}>
+            <Icon name="image-outline" size={32} color={colors.primary} />
+            <Text style={styles.receiptSheetOptionText}>Gallery</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={styles.receiptSheetCancel}
+          onPress={() => setAddReceiptSheetVisible(false)}>
+          <Text style={styles.receiptSheetCancelText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   useEffect(() => {
     updateFilteredData();
   }, [quickPeriod, selectedMonth, selectedYear, transactions, monthStartDay]);
@@ -1603,6 +1884,9 @@ const AccountDetailScreen = ({route, navigation}) => {
           const editCount = Number(txn.edit_count) || 0;
           const editHistory = editCount ? parseEditHistory(txn) : [];
           const isTransfer = isTransferTransaction(txn);
+          const receiptUri = txn.image_uri
+            ? normalizeImageUri(txn.image_uri)
+            : '';
 
           return (
             <View key={txn.id}>
@@ -1665,6 +1949,16 @@ const AccountDetailScreen = ({route, navigation}) => {
                       {txn.remark}
                     </Text>
                   ) : null}
+                  {!isDeleted && receiptUri ? (
+                    <Pressable
+                      style={styles.receiptBubbleThumb}
+                      onPress={() => openReceiptPreview(txn.image_uri)}>
+                      <Image
+                        source={{uri: receiptUri}}
+                        style={styles.receiptBubbleImage}
+                      />
+                    </Pressable>
+                  ) : null}
                   <View
                     style={[
                       styles.chatMeta,
@@ -1701,8 +1995,25 @@ const AccountDetailScreen = ({route, navigation}) => {
   const showEntryDateTime = scheduleType === 'once';
   const showDayPicker = scheduleType === 'weekly' || scheduleType === '2weeks';
   const showDatePicker = ['monthly', '2months', '3months', '6months'].includes(scheduleType);
-
+  const isTransferModeActive = withdrawMode === 'transfer';
+  const renderReceiptPreviewHeader = useCallback(() => {
     return (
+      <View style={styles.previewHeader}>
+        <TouchableOpacity
+          style={styles.previewHeaderButton}
+          onPress={closeReceiptPreview}>
+          <Icon name="close" size={22} color={colors.white} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.previewHeaderButton}
+          onPress={() => downloadReceiptToDownloads(receiptPreviewUri)}>
+          <Icon name="download-outline" size={22} color={colors.white} />
+        </TouchableOpacity>
+      </View>
+    );
+  }, [closeReceiptPreview, downloadReceiptToDownloads, receiptPreviewUri]);
+
+  return (
     <View
       style={[
         styles.container,
@@ -2310,16 +2621,52 @@ const AccountDetailScreen = ({route, navigation}) => {
                 />
               )}
               <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
-              <TextInput
-                style={styles.modalNoteInput}
-                value={withdrawNote}
-                onChangeText={setWithdrawNote}
-                placeholder="Add a note"
-                placeholderTextColor={colors.text.light}
-                multiline
-                numberOfLines={3}
-                editable={!loading}
-              />
+              <View style={styles.noteInputWithAttach}>
+                <TextInput
+                  style={[styles.modalNoteInput, styles.modalNoteInputPadded]}
+                  value={withdrawNote}
+                  onChangeText={setWithdrawNote}
+                  placeholder="Add a note"
+                  placeholderTextColor={colors.text.light}
+                  multiline
+                  numberOfLines={3}
+                  editable={!loading}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.attachButton,
+                    isTransferModeActive && styles.attachButtonDisabled,
+                  ]}
+                  onPress={handleAddReceipt}
+                  disabled={loading || isTransferModeActive}>
+                  <Icon
+                    name="attach-outline"
+                    size={20}
+                    color={
+                      isTransferModeActive
+                        ? colors.text.light
+                        : colors.text.secondary
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+              {withdrawReceiptUri ? (
+                <View style={styles.receiptPreviewRow}>
+                  <Pressable
+                    style={styles.receiptThumbWrapper}
+                    onPress={() => openReceiptPreview(withdrawReceiptUri)}>
+                    <Image
+                      source={{uri: normalizeImageUri(withdrawReceiptUri)}}
+                      style={styles.receiptThumb}
+                    />
+                  </Pressable>
+                  <TouchableOpacity
+                    style={styles.receiptRemoveButton}
+                    onPress={handleRemoveReceipt}>
+                    <Text style={styles.receiptRemoveText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
               <TouchableOpacity
                 style={[
                   styles.modalAddButton,
@@ -2366,6 +2713,31 @@ const AccountDetailScreen = ({route, navigation}) => {
         onClose={() => setBottomSheetVisible(false)}>
         {renderBottomSheetContent()}
       </BottomSheet>
+
+      <BottomSheet
+        visible={addReceiptSheetVisible}
+        onClose={() => setAddReceiptSheetVisible(false)}>
+        {renderAddReceiptSheet()}
+      </BottomSheet>
+
+      <Modal
+        visible={receiptPreviewVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeReceiptPreview}>
+        <View style={styles.previewOverlay}>
+          <ImageViewer
+            imageUrls={[
+              {url: normalizeImageUri(receiptPreviewUri)},
+            ]}
+            enableSwipeDown
+            onSwipeDown={closeReceiptPreview}
+            renderHeader={renderReceiptPreviewHeader}
+            saveToLocalByLongPress={false}
+            backgroundColor="transparent"
+          />
+        </View>
+      </Modal>
 
       <Modal
         visible={optionsVisible}
@@ -2476,6 +2848,26 @@ const AccountDetailScreen = ({route, navigation}) => {
                 </Text>
               </View>
             </TouchableOpacity>
+            {selectedTransaction?.image_uri ? (
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={() => {
+                  if (!selectedTransaction?.image_uri) {
+                    return;
+                  }
+                  closeOptionsMenu(true);
+                  openReceiptPreview(selectedTransaction.image_uri);
+                }}>
+                <View style={styles.optionItemRow}>
+                  <Icon
+                    name="image-outline"
+                    size={20}
+                    color={colors.text.primary}
+                  />
+                  <Text style={styles.optionText}>View Bill Photo</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               style={[
                 styles.optionButton,
@@ -2541,12 +2933,18 @@ const AccountDetailScreen = ({route, navigation}) => {
                                 linked.account_id,
                                 linkedHistory
                               );
+                              await deleteReceiptFileIfPossible(
+                                linked.image_uri
+                              );
                             }
                           }
                           await deleteTransaction(
                             selectedTransaction.id,
                             account.id,
                             deleteHistory
+                          );
+                          await deleteReceiptFileIfPossible(
+                            selectedTransaction.image_uri
                           );
                           loadTransactions();
                           setSelectedTransaction(null);
@@ -3094,6 +3492,160 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: '#EF4444',
     fontWeight: fontWeight.semibold,
+  },
+  receiptSheetContainer: {
+    padding: spacing.md,
+  },
+  receiptSheetTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  receiptSheetSubtitle: {
+    fontSize: fontSize.medium,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  receiptSheetOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  receiptSheetOption: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 1},
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+    minWidth: 120,
+    justifyContent: 'center',
+  },
+  receiptSheetOptionText: {
+    marginTop: spacing.xs,
+    fontSize: fontSize.medium,
+    color: colors.primary,
+    fontWeight: fontWeight.medium,
+  },
+  receiptSheetCancel: {
+    backgroundColor: colors.border,
+    borderRadius: 8,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  receiptSheetCancelText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+  },
+  noteInputWithAttach: {
+    position: 'relative',
+    marginBottom: spacing.md,
+  },
+  modalNoteInputPadded: {
+    paddingRight: 40, // Make space for the attach button
+  },
+  attachButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachButtonDisabled: {
+    opacity: 0.5,
+  },
+  receiptPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  receiptThumbWrapper: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#F3F4F6',
+    overflow: 'hidden',
+  },
+  receiptThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  receiptRemoveButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    backgroundColor: '#FEF2F2',
+  },
+  receiptRemoveText: {
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    color: '#B91C1C',
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  previewHeader: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 2,
+  },
+  previewHeaderButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  previewContent: {
+    width: '100%',
+    height: '80%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: colors.black,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  receiptBubbleThumb: {
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  receiptBubbleImage: {
+    width: 180,
+    height: 110,
   },
   modalOverlay: {
     flex: 1,

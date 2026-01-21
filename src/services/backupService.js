@@ -13,6 +13,7 @@ const DB_FILE_BASES = ['accountsDB.db', 'ledgerDB.db', 'accountApp.db'];
 const BACKUP_DIR = `${RNFS.CachesDirectoryPath}/backup_tmp`;
 const ARCHIVE_NAME_PREFIX = 'backup_';
 const BACKUP_META_KEY = 'backup.meta';
+const RECEIPTS_DIR_NAME = 'receipts';
 
 const EXCLUDED_ASYNC_KEYS = new Set([
   'firebaseToken',
@@ -113,7 +114,7 @@ const collectAsyncStorageSnapshot = async () => {
   }, {});
 };
 
-const writeSnapshotFiles = async ({firebaseUid}) => {
+const writeSnapshotFiles = async ({firebaseUid, includeReceipts = true}) => {
   await safeUnlink(BACKUP_DIR);
   await ensureDir(BACKUP_DIR);
 
@@ -162,11 +163,29 @@ const writeSnapshotFiles = async ({firebaseUid}) => {
     'utf8',
   );
 
+  let receiptFiles = [];
+  if (includeReceipts) {
+    const receiptsSource = `${RNFS.DocumentDirectoryPath}/${RECEIPTS_DIR_NAME}`;
+    if (await RNFS.exists(receiptsSource)) {
+      const receiptsTarget = `${dataDir}/${RECEIPTS_DIR_NAME}`;
+      await ensureDir(receiptsTarget);
+      const files = await RNFS.readDir(receiptsSource);
+      for (const file of files) {
+        if (file.isFile()) {
+          const target = `${receiptsTarget}/${file.name}`;
+          await RNFS.copyFile(file.path, target);
+          receiptFiles.push(file.name);
+        }
+      }
+    }
+  }
+
   const manifest = {
     backupVersion: 1,
     createdAt: Date.now(),
     firebaseUid: firebaseUid || null,
     dbFiles,
+    receiptFiles,
   };
 
   console.log('📦 [BACKUP] Total files added to backup:', dbFiles.length);
@@ -181,8 +200,11 @@ const writeSnapshotFiles = async ({firebaseUid}) => {
   return {dataDir, manifest};
 };
 
-export const createBackupArchive = async ({firebaseUid}) => {
-  const {dataDir, manifest} = await writeSnapshotFiles({firebaseUid});
+export const createBackupArchive = async ({firebaseUid, includeReceipts}) => {
+  const {dataDir, manifest} = await writeSnapshotFiles({
+    firebaseUid,
+    includeReceipts,
+  });
   const archiveName = `${ARCHIVE_NAME_PREFIX}${firebaseUid || 'unknown'}.zip`;
   const archivePath = `${BACKUP_DIR}/${archiveName}`;
   await safeUnlink(archivePath);
@@ -191,13 +213,19 @@ export const createBackupArchive = async ({firebaseUid}) => {
   return {archivePath, archiveName, manifest};
 };
 
-export const performBackup = async ({firebaseUid, accountEmail}) => {
+export const performBackup = async ({
+  firebaseUid,
+  accountEmail,
+  includeReceipts,
+  onProgress,
+}) => {
   console.log('📦 [BACKUP] ===== Starting Backup =====');
   console.log('📦 [BACKUP] firebaseUid:', firebaseUid);
   console.log('📦 [BACKUP] accountEmail:', accountEmail);
 
   const {archivePath, archiveName, manifest} = await createBackupArchive({
     firebaseUid,
+    includeReceipts,
   });
 
   console.log('📦 [BACKUP] Archive created:', archiveName);
@@ -210,6 +238,7 @@ export const performBackup = async ({firebaseUid, accountEmail}) => {
     filePath: archivePath,
     fileName: archiveName,
     existingFileId: fileId || null,
+    onProgress,
   });
 
   console.log('✅ [BACKUP] Upload successful! Result:', uploadResult);
@@ -371,6 +400,19 @@ export const restoreFromBackup = async ({fileId}) => {
     const preservedEntries = preserved.filter(([, value]) => value != null);
     if (preservedEntries.length > 0) {
       await AsyncStorage.multiSet(preservedEntries);
+    }
+  }
+
+  const receiptsSource = `${dataDir}/${RECEIPTS_DIR_NAME}`;
+  if (await RNFS.exists(receiptsSource)) {
+    const receiptsTarget = `${RNFS.DocumentDirectoryPath}/${RECEIPTS_DIR_NAME}`;
+    await ensureDir(receiptsTarget);
+    const receiptFiles = await RNFS.readDir(receiptsSource);
+    for (const file of receiptFiles) {
+      if (file.isFile()) {
+        const target = `${receiptsTarget}/${file.name}`;
+        await RNFS.copyFile(file.path, target);
+      }
     }
   }
 

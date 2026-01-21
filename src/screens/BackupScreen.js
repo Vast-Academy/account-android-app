@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
+import PushNotification from 'react-native-push-notification';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {
   ensureDriveScopes,
@@ -26,6 +27,7 @@ import {
   setAutoBackupEnabled,
 } from '../utils/backupQueue';
 import {listAppDataFiles} from '../services/driveService';
+import {notificationService} from '../services/NotificationService';
 
 const formatBytes = value => {
   const num = Number(value);
@@ -48,14 +50,19 @@ const BackupScreen = ({navigation}) => {
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [backupEnabled, setBackupEnabled] = useState(true);
   const [lastBackupAt, setLastBackupAt] = useState('');
+  const [includeReceipts, setIncludeReceipts] = useState(true);
+  const [uploadMessage, setUploadMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const backupNotificationId = 'backup-progress';
 
   const loadSettings = async () => {
     const storedEmail = await AsyncStorage.getItem('backup.accountEmail');
     const enabled = await isAutoBackupEnabled();
     const last = await AsyncStorage.getItem('backup.lastSuccessAt');
+    const include = await AsyncStorage.getItem('backup.includeReceipts');
     setAccountEmail(storedEmail || '');
     setBackupEnabled(enabled);
+    setIncludeReceipts(include !== 'false');
     if (last) {
       const date = new Date(Number(last));
       setLastBackupAt(date.toLocaleString());
@@ -118,18 +125,73 @@ const BackupScreen = ({navigation}) => {
     await setAutoBackupEnabled(value);
   };
 
+  const handleToggleReceipts = async value => {
+    setIncludeReceipts(value);
+    await AsyncStorage.setItem('backup.includeReceipts', value ? 'true' : 'false');
+  };
+
   const handleBackupNow = async () => {
     try {
       setBusy(true);
+      setUploadMessage('Preparing backup...');
+      notificationService.requestPermissions();
+      PushNotification.localNotification({
+        id: backupNotificationId,
+        channelId: 'default-channel-id',
+        title: 'Backup',
+        message: 'Preparing backup...',
+        ongoing: true,
+        onlyAlertOnce: true,
+        autoCancel: false,
+      });
       await ensureDriveScopes();
       const firebaseUid = await AsyncStorage.getItem('firebaseUid');
       const email = accountEmail || (await AsyncStorage.getItem('backup.accountEmail'));
-      await performBackup({firebaseUid, accountEmail: email});
+      const include = await AsyncStorage.getItem('backup.includeReceipts');
+      const handleProgress = (written, total) => {
+        const message = total
+          ? `Uploading: ${formatBytes(written)} of ${formatBytes(total)}`
+          : `Uploading: ${formatBytes(written)}`;
+        setUploadMessage(message);
+        PushNotification.localNotification({
+          id: backupNotificationId,
+          channelId: 'default-channel-id',
+          title: 'Backup',
+          message,
+          ongoing: true,
+          onlyAlertOnce: true,
+          autoCancel: false,
+        });
+      };
+      await performBackup({
+        firebaseUid,
+        accountEmail: email,
+        includeReceipts: include !== 'false',
+        onProgress: handleProgress,
+      });
       await AsyncStorage.setItem('backup.lastSuccessAt', String(Date.now()));
       await loadSettings();
+      setUploadMessage('');
+      PushNotification.localNotification({
+        id: backupNotificationId,
+        channelId: 'default-channel-id',
+        title: 'Backup',
+        message: 'Backup complete.',
+        ongoing: false,
+        autoCancel: true,
+      });
       Alert.alert('Backup Complete', 'Your data has been backed up.');
     } catch (error) {
       console.error('Manual backup failed:', error);
+      setUploadMessage('');
+      PushNotification.localNotification({
+        id: backupNotificationId,
+        channelId: 'default-channel-id',
+        title: 'Backup',
+        message: 'Backup failed.',
+        ongoing: false,
+        autoCancel: true,
+      });
       Alert.alert('Backup Failed', 'Unable to backup right now.');
     } finally {
       setBusy(false);
@@ -246,11 +308,22 @@ const BackupScreen = ({navigation}) => {
       </View>
 
       <View style={styles.section}>
+        <View style={styles.row}>
+          <Text style={styles.sectionTitle}>Receipt Photos</Text>
+          <Switch value={includeReceipts} onValueChange={handleToggleReceipts} />
+        </View>
+        <Text style={styles.subText}>Include receipt photos in backup.</Text>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Last Backup</Text>
         <Text style={styles.subText}>{lastBackupAt || 'No backups yet'}</Text>
       </View>
 
       <View style={styles.actions}>
+        {uploadMessage ? (
+          <Text style={styles.progressText}>{uploadMessage}</Text>
+        ) : null}
         <TouchableOpacity style={styles.primaryButton} onPress={handleBackupNow} disabled={busy}>
           {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Back up now</Text>}
         </TouchableOpacity>
@@ -374,6 +447,12 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: colors.text.primary,
     fontWeight: fontWeight.semibold,
+  },
+  progressText: {
+    marginBottom: spacing.sm,
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    textAlign: 'center',
   },
   debugButton: {
     marginTop: spacing.sm,
