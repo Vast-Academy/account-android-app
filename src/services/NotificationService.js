@@ -1,64 +1,104 @@
-import PushNotification from 'react-native-push-notification';
+import notifee, {
+  AndroidImportance,
+  AndroidVisibility,
+  EventType,
+} from '@notifee/react-native';
 import {Platform} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const REMINDER_SCHEDULED_KEY = 'notifications.expenseRemindersScheduled';
+const REMINDER_IDS = ['expense-reminder-10am', 'expense-reminder-9pm'];
 
 class NotificationService {
   constructor() {
     this.configure();
-    this.createChannel();
   }
 
   configure() {
-    PushNotification.configure({
-      onRegister: function (token) {
-        console.log('TOKEN:', token);
-      },
-      onNotification: function (notification) {
-        console.log('NOTIFICATION:', notification);
-        notification.finish(PushNotification.FetchResult.NoData);
-      },
-      onAction: function (notification) {
-        console.log('ACTION:', notification.action);
-        console.log('NOTIFICATION:', notification);
-      },
-      onRegistrationError: function (err) {
-        console.error(err.message, err);
-      },
-      permissions: {
-        alert: true,
-        badge: true,
-        sound: true,
-      },
-      popInitialNotification: true,
-      requestPermissions: Platform.OS === 'ios',
+    notifee.onForegroundEvent(({type, detail}) => {
+      if (type === EventType.PRESS) {
+        console.log('NOTIFICATION PRESS:', detail?.notification?.id);
+      }
     });
   }
 
-  createChannel() {
-    PushNotification.createChannel(
-      {
-        channelId: 'default-channel-id', // (required)
-        channelName: 'Default channel', // (required)
-        channelDescription: 'A default channel for notifications', // (optional) default: undefined.
-        soundName: 'default', // (optional) See `soundName` parameter of `PushNotification.localNotification`
-        importance: 4, // (optional) default: 4. Int value of the Android notification importance
-        vibrate: true, // (optional) default: true. Creates the default vibration patten if true.
-      },
-      (created) => console.log(`createChannel returned '${created}'`), // (optional) callback returns whether the channel was created, false means it already existed.
-    );
+  async createChannel() {
+    if (Platform.OS !== 'android') {
+      return null;
+    }
+    return notifee.createChannel({
+      id: 'default',
+      name: 'Default',
+      description: 'Default notifications',
+      importance: AndroidImportance.DEFAULT,
+      visibility: AndroidVisibility.PUBLIC,
+      vibration: true,
+    });
   }
 
-  showLocalNotification(title, message) {
-    PushNotification.localNotification({
-      channelId: 'default-channel-id', // (required)
+  async ensureExpenseRemindersScheduled() {
+    const alreadyScheduled = await AsyncStorage.getItem(REMINDER_SCHEDULED_KEY);
+    if (alreadyScheduled === 'true') {
+      return;
+    }
+
+    await this.requestPermissions();
+    const channelId = await this.createChannel();
+
+    await notifee.cancelTriggerNotifications();
+
+    const scheduleDaily = async (id, hour, minute) => {
+      await notifee.createTriggerNotification(
+        {
+          id,
+          title: 'Expense Reminder',
+          body: 'Please note and manage your expenses today.',
+          android: {
+            channelId: channelId || 'default',
+            pressAction: {id: 'default'},
+          },
+        },
+        {
+          type: notifee.TriggerType.TIMESTAMP,
+          timestamp: NotificationService.getNextTriggerTime(hour, minute),
+          repeatFrequency: notifee.RepeatFrequency.DAILY,
+        },
+      );
+    };
+
+    await scheduleDaily(REMINDER_IDS[0], 10, 0);
+    await scheduleDaily(REMINDER_IDS[1], 21, 0);
+
+    await AsyncStorage.setItem(REMINDER_SCHEDULED_KEY, 'true');
+  }
+
+  static getNextTriggerTime(hour, minute) {
+    const now = new Date();
+    const next = new Date();
+    next.setHours(hour, minute, 0, 0);
+    if (next <= now) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next.getTime();
+  }
+
+  async showLocalNotification(title, message) {
+    const channelId = await this.createChannel();
+    await notifee.displayNotification({
       title: title,
-      message: message,
+      body: message,
+      android: {
+        channelId: channelId || 'default',
+        pressAction: {id: 'default'},
+      },
     });
   }
 
   requestPermissions() {
-      if (Platform.OS === 'android' && Platform.Version >= 33) {
-        PushNotification.requestPermissions();
+    if (Platform.OS === 'android') {
+      return notifee.requestPermission();
     }
+    return Promise.resolve();
   }
 }
 

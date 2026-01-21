@@ -3,28 +3,19 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {updateProfile} from '../services/api';
+import CurrencyPickerModal, {CURRENCIES} from '../components/CurrencyPickerModal';
 
-const CURRENCY_OPTIONS = [
-  {label: '\u20B9 Rupee', symbol: '\u20B9'},
-  {label: '$ Dollar', symbol: '$'},
-  {label: '\u20AC Euro', symbol: '\u20AC'},
-  {label: '\u00A3 Pound', symbol: '\u00A3'},
-  {label: '\u00A5 Yen', symbol: '\u00A5'},
-  {label: '\u20A9 Won', symbol: '\u20A9'},
-  {label: '\u20BD Ruble', symbol: '\u20BD'},
-  {label: '\u20BA Lira', symbol: '\u20BA'},
-  {label: '\u09F3 Taka', symbol: '\u09F3'},
-  {label: '\u20B1 Peso', symbol: '\u20B1'},
-];
+const getCurrencyLabel = symbol => {
+  const match = CURRENCIES.find(item => item.symbol === symbol);
+  return match ? match.label : symbol;
+};
 
 const CurrencySetupScreen = ({navigation, route}) => {
   const routeUser = route.params?.user || null;
@@ -32,6 +23,9 @@ const CurrencySetupScreen = ({navigation, route}) => {
   const [selectedSymbol, setSelectedSymbol] = React.useState('');
   const [currentUser, setCurrentUser] = React.useState(routeUser);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [currencyModalVisible, setCurrencyModalVisible] = React.useState(
+    !fromSettings
+  );
 
   React.useEffect(() => {
     const loadUser = async () => {
@@ -57,19 +51,27 @@ const CurrencySetupScreen = ({navigation, route}) => {
     loadUser();
   }, [routeUser, fromSettings]);
 
-  const handleContinue = async () => {
-    if (!selectedSymbol) {
-      Alert.alert('Select Currency', 'Please select a currency to continue.');
+  React.useEffect(() => {
+    if (!fromSettings && !selectedSymbol) {
+      setCurrencyModalVisible(true);
+    }
+  }, [fromSettings, selectedSymbol]);
+
+  const handleCurrencySelect = async currency => {
+    if (!currency) {
       return;
     }
-
+    const symbol = currency.symbol;
+    setSelectedSymbol(symbol);
+    setCurrencyModalVisible(false);
     setIsLoading(true);
     try {
       const storedUser = currentUser
         ? currentUser
         : JSON.parse((await AsyncStorage.getItem('user')) || '{}');
 
-      const firebaseUid = storedUser?.firebaseUid || await AsyncStorage.getItem('firebaseUid');
+      const firebaseUid =
+        storedUser?.firebaseUid || (await AsyncStorage.getItem('firebaseUid'));
 
       if (!firebaseUid) {
         Alert.alert('Error', 'User authentication error. Please login again.');
@@ -80,7 +82,7 @@ const CurrencySetupScreen = ({navigation, route}) => {
       // Save currency to backend
       const response = await updateProfile(firebaseUid, {
         displayName: storedUser.displayName || storedUser.name || storedUser.email?.split('@')[0] || 'User',
-        currencySymbol: selectedSymbol,
+        currencySymbol: symbol,
       });
 
       if (!response?.success) {
@@ -92,7 +94,7 @@ const CurrencySetupScreen = ({navigation, route}) => {
       const updatedUser = {
         ...storedUser,
         ...response.user,
-        currencySymbol: selectedSymbol,
+        currencySymbol: symbol,
       };
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
 
@@ -106,6 +108,9 @@ const CurrencySetupScreen = ({navigation, route}) => {
     } catch (error) {
       console.error('Failed to save currency selection:', error);
       Alert.alert('Error', 'Failed to save currency. Please try again.');
+      if (!fromSettings) {
+        setCurrencyModalVisible(true);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -133,52 +138,34 @@ const CurrencySetupScreen = ({navigation, route}) => {
         </Text>
       </View>
 
-      <ScrollView style={styles.list}>
-        {CURRENCY_OPTIONS.map(option => {
-          const isActive = option.symbol === selectedSymbol;
-          return (
-            <TouchableOpacity
-              key={option.symbol}
-              style={[
-                styles.optionRow,
-                isActive && styles.optionRowActive,
-              ]}
-              onPress={() => setSelectedSymbol(option.symbol)}>
-              <View style={styles.optionLeft}>
-                <View style={styles.optionSymbol}>
-                  <Text style={styles.optionSymbolText}>{option.symbol}</Text>
-                </View>
-                <Text
-                  style={[
-                    styles.optionLabel,
-                    isActive && styles.optionLabelActive,
-                  ]}>
-                  {option.label}
-                </Text>
-              </View>
-              {isActive && (
-                <Icon name="checkmark" size={20} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      <View style={styles.selectorContainer}>
+        <TouchableOpacity
+          style={styles.selectorRow}
+          onPress={() => setCurrencyModalVisible(true)}
+          disabled={isLoading}>
+          <View style={styles.selectorLeft}>
+            <View style={styles.selectorSymbol}>
+              <Text style={styles.selectorSymbolText}>
+                {selectedSymbol || '₹'}
+              </Text>
+            </View>
+            <Text style={styles.selectorLabel}>
+              {selectedSymbol
+                ? `${selectedSymbol} ${getCurrencyLabel(selectedSymbol)}`
+                : 'Select a currency'}
+            </Text>
+          </View>
+          <Icon name="chevron-forward" size={20} color={colors.text.light} />
+        </TouchableOpacity>
+      </View>
 
-      <TouchableOpacity
-        style={[
-          styles.continueButton,
-          (!selectedSymbol || isLoading) && styles.continueButtonDisabled,
-        ]}
-        onPress={handleContinue}
-        disabled={!selectedSymbol || isLoading}>
-        {isLoading ? (
-          <ActivityIndicator color={colors.white} />
-        ) : (
-          <Text style={styles.continueButtonText}>
-            {fromSettings ? 'Save' : 'Continue'}
-          </Text>
-        )}
-      </TouchableOpacity>
+      <CurrencyPickerModal
+        visible={currencyModalVisible}
+        onClose={() => setCurrencyModalVisible(false)}
+        onSelect={handleCurrencySelect}
+        currentSymbol={selectedSymbol}
+        isSaving={isLoading}
+      />
     </View>
   );
 };
@@ -225,11 +212,10 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: colors.text.secondary,
   },
-  list: {
-    flex: 1,
+  selectorContainer: {
     paddingHorizontal: spacing.md,
   },
-  optionRow: {
+  selectorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -237,20 +223,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  optionRowActive: {
-    borderColor: colors.primary,
-    backgroundColor: '#F0F9FF',
-  },
-  optionLeft: {
+  selectorLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
-  optionSymbol: {
+  selectorSymbol: {
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -258,34 +239,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  optionSymbolText: {
+  selectorSymbolText: {
     fontSize: fontSize.medium,
     color: colors.text.primary,
   },
-  optionLabel: {
+  selectorLabel: {
     fontSize: fontSize.medium,
     color: colors.text.primary,
     fontWeight: fontWeight.medium,
-  },
-  optionLabelActive: {
-    color: colors.primary,
-    fontWeight: fontWeight.bold,
-  },
-  continueButton: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-  },
-  continueButtonDisabled: {
-    opacity: 0.6,
-  },
-  continueButtonText: {
-    color: colors.white,
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
   },
 });
 

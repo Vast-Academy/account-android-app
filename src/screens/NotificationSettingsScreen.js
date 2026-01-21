@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, Text, StyleSheet, TouchableOpacity, Platform} from 'react-native';
+import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
 import {notificationService} from '../services/NotificationService';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import Icon from 'react-native-vector-icons/Ionicons';
