@@ -115,7 +115,7 @@ export const uploadAppDataFile = async ({
         'Content-Length': String(fileSize),
       },
       RNBlobUtil.wrap(filePath),
-    ).uploadProgress({interval: 250}, (written, total) => {
+    ).uploadProgress({interval: 1}, (written, total) => {
       if (onProgress) {
         onProgress(written, total || fileSize);
       }

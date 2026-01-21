@@ -2649,16 +2649,18 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         animationType="fade"
         onRequestClose={closeReceiptPreview}>
         <View style={styles.previewOverlay}>
-          <ImageViewer
-            imageUrls={[
-              {url: normalizeImageUri(receiptPreviewUri)},
-            ]}
-            enableSwipeDown
-            onSwipeDown={closeReceiptPreview}
-            renderHeader={renderReceiptPreviewHeader}
-            saveToLocalByLongPress={false}
-            backgroundColor="transparent"
-          />
+          <View style={styles.previewViewer}>
+            <ImageViewer
+              imageUrls={[
+                {url: normalizeImageUri(receiptPreviewUri)},
+              ]}
+              enableSwipeDown
+              onSwipeDown={closeReceiptPreview}
+              renderHeader={renderReceiptPreviewHeader}
+              saveToLocalByLongPress={false}
+              backgroundColor="transparent"
+            />
+          </View>
         </View>
       </Modal>
 
@@ -3167,26 +3169,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         onClose={() => setAddReceiptSheetVisible(false)}>
         {renderAddReceiptSheet()}
       </BottomSheet>
-      <Modal
-        visible={receiptPreviewVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeReceiptPreview}>
-        <View style={styles.previewOverlay}>
-          <TouchableOpacity
-            style={styles.previewBackdrop}
-            activeOpacity={1}
-            onPress={closeReceiptPreview}
-          />
-          <View style={styles.previewContent}>
-            <Image
-              source={{uri: normalizeImageUri(receiptPreviewUri)}}
-              style={styles.previewImage}
-              resizeMode="contain"
-            />
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -3926,6 +3908,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.md,
+  },
+  previewViewer: {
+    width: '100%',
+    height: '100%',
   },
   previewHeader: {
     position: 'absolute',

@@ -2726,16 +2726,18 @@ const AccountDetailScreen = ({route, navigation}) => {
         animationType="fade"
         onRequestClose={closeReceiptPreview}>
         <View style={styles.previewOverlay}>
-          <ImageViewer
-            imageUrls={[
-              {url: normalizeImageUri(receiptPreviewUri)},
-            ]}
-            enableSwipeDown
-            onSwipeDown={closeReceiptPreview}
-            renderHeader={renderReceiptPreviewHeader}
-            saveToLocalByLongPress={false}
-            backgroundColor="transparent"
-          />
+          <View style={styles.previewViewer}>
+            <ImageViewer
+              imageUrls={[
+                {url: normalizeImageUri(receiptPreviewUri)},
+              ]}
+              enableSwipeDown
+              onSwipeDown={closeReceiptPreview}
+              renderHeader={renderReceiptPreviewHeader}
+              saveToLocalByLongPress={false}
+              backgroundColor="transparent"
+            />
+          </View>
         </View>
       </Modal>
 
@@ -3603,6 +3605,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.md,
+  },
+  previewViewer: {
+    width: '100%',
+    height: '100%',
   },
   previewHeader: {
     position: 'absolute',

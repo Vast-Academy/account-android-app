@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,14 @@ import {
   ActivityIndicator,
   Alert,
   Switch,
+  Modal,
+  Animated,
+  Easing,
+  DeviceEventEmitter,
 } from 'react-native';
+import Svg, {Circle} from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
-import PushNotification from 'react-native-push-notification';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {
   ensureDriveScopes,
@@ -27,7 +31,6 @@ import {
   setAutoBackupEnabled,
 } from '../utils/backupQueue';
 import {listAppDataFiles} from '../services/driveService';
-import {notificationService} from '../services/NotificationService';
 
 const formatBytes = value => {
   const num = Number(value);
@@ -51,9 +54,14 @@ const BackupScreen = ({navigation}) => {
   const [backupEnabled, setBackupEnabled] = useState(true);
   const [lastBackupAt, setLastBackupAt] = useState('');
   const [includeReceipts, setIncludeReceipts] = useState(true);
-  const [uploadMessage, setUploadMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const backupNotificationId = 'backup-progress';
+  const [progressVisible, setProgressVisible] = useState(false);
+  const [progressTitle, setProgressTitle] = useState('Backup in progress');
+  const [progressSubtitle, setProgressSubtitle] = useState('Please wait...');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const progressStartRef = useRef(0);
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const progressTimerRef = useRef(null);
 
   const loadSettings = async () => {
     const storedEmail = await AsyncStorage.getItem('backup.accountEmail');
@@ -130,70 +138,106 @@ const BackupScreen = ({navigation}) => {
     await AsyncStorage.setItem('backup.includeReceipts', value ? 'true' : 'false');
   };
 
+  const openProgressModal = () => {
+    setProgressVisible(true);
+    progressAnim.setValue(0);
+    Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeProgressModal = () => {
+    Animated.timing(progressAnim, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setProgressVisible(false);
+    });
+  };
+
+  const waitMinVisible = async (minMs = 1200) => {
+    const elapsed = Date.now() - progressStartRef.current;
+    const remaining = Math.max(0, minMs - elapsed);
+    if (remaining > 0) {
+      await new Promise(resolve => setTimeout(resolve, remaining));
+    }
+  };
+
+  const clearProgressTimer = () => {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  };
+
+  const startFakeProgress = () => {
+    clearProgressTimer();
+    setProgressPercent(0);
+    let current = 0;
+    progressTimerRef.current = setInterval(() => {
+      if (current < 90) {
+        current += 2;
+      } else if (current < 98) {
+        current += 0.4;
+      } else {
+        current += 0.1;
+      }
+      if (current > 99.2) {
+        current = 99.2;
+      }
+      setProgressPercent(current);
+    }, 80);
+  };
+
+  const finishFakeProgress = () => {
+    clearProgressTimer();
+    setProgressPercent(100);
+  };
+
   const handleBackupNow = async () => {
     try {
       setBusy(true);
-      setUploadMessage('Preparing backup...');
-      notificationService.requestPermissions();
-      PushNotification.localNotification({
-        id: backupNotificationId,
-        channelId: 'default-channel-id',
-        title: 'Backup',
-        message: 'Preparing backup...',
-        ongoing: true,
-        onlyAlertOnce: true,
-        autoCancel: false,
-      });
+      progressStartRef.current = Date.now();
+      setProgressTitle('Backup in progress');
+      setProgressSubtitle('Please wait...');
+      openProgressModal();
+      startFakeProgress();
+      DeviceEventEmitter.emit('backup:manualStatus', true);
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      await new Promise(resolve => setTimeout(resolve, 100));
       await ensureDriveScopes();
       const firebaseUid = await AsyncStorage.getItem('firebaseUid');
       const email = accountEmail || (await AsyncStorage.getItem('backup.accountEmail'));
       const include = await AsyncStorage.getItem('backup.includeReceipts');
-      const handleProgress = (written, total) => {
-        const message = total
-          ? `Uploading: ${formatBytes(written)} of ${formatBytes(total)}`
-          : `Uploading: ${formatBytes(written)}`;
-        setUploadMessage(message);
-        PushNotification.localNotification({
-          id: backupNotificationId,
-          channelId: 'default-channel-id',
-          title: 'Backup',
-          message,
-          ongoing: true,
-          onlyAlertOnce: true,
-          autoCancel: false,
-        });
-      };
       await performBackup({
         firebaseUid,
         accountEmail: email,
         includeReceipts: include !== 'false',
-        onProgress: handleProgress,
       });
       await AsyncStorage.setItem('backup.lastSuccessAt', String(Date.now()));
       await loadSettings();
-      setUploadMessage('');
-      PushNotification.localNotification({
-        id: backupNotificationId,
-        channelId: 'default-channel-id',
-        title: 'Backup',
-        message: 'Backup complete.',
-        ongoing: false,
-        autoCancel: true,
-      });
+      setProgressTitle('Backup finished');
+      setProgressSubtitle('Backup completed.');
+      finishFakeProgress();
+      await waitMinVisible();
+      closeProgressModal();
       Alert.alert('Backup Complete', 'Your data has been backed up.');
     } catch (error) {
       console.error('Manual backup failed:', error);
-      setUploadMessage('');
-      PushNotification.localNotification({
-        id: backupNotificationId,
-        channelId: 'default-channel-id',
-        title: 'Backup',
-        message: 'Backup failed.',
-        ongoing: false,
-        autoCancel: true,
-      });
+      setProgressTitle('Backup failed');
+      setProgressSubtitle('Unable to backup right now.');
+      finishFakeProgress();
+      await waitMinVisible();
+      closeProgressModal();
       Alert.alert('Backup Failed', 'Unable to backup right now.');
     } finally {
+      clearProgressTimer();
+      DeviceEventEmitter.emit('backup:manualStatus', false);
       setBusy(false);
     }
   };
@@ -321,9 +365,6 @@ const BackupScreen = ({navigation}) => {
       </View>
 
       <View style={styles.actions}>
-        {uploadMessage ? (
-          <Text style={styles.progressText}>{uploadMessage}</Text>
-        ) : null}
         <TouchableOpacity style={styles.primaryButton} onPress={handleBackupNow} disabled={busy}>
           {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Back up now</Text>}
         </TouchableOpacity>
@@ -334,6 +375,63 @@ const BackupScreen = ({navigation}) => {
           <Text style={styles.debugText}>Show Debug Info</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={progressVisible}
+        transparent
+        animationType="none"
+        onRequestClose={() => {}}>
+        <View style={styles.modalOverlay}>
+          <Animated.View
+            style={[
+              styles.modalCard,
+              {
+                opacity: progressAnim,
+                transform: [
+                  {
+                    translateY: progressAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <View style={styles.progressRing}>
+              <Svg width={72} height={72}>
+                <Circle
+                  cx={36}
+                  cy={36}
+                  r={30}
+                  stroke="#E5E7EB"
+                  strokeWidth={6}
+                  fill="none"
+                />
+                <Circle
+                  cx={36}
+                  cy={36}
+                  r={30}
+                  stroke={colors.primary}
+                  strokeWidth={6}
+                  fill="none"
+                  strokeDasharray={2 * Math.PI * 30}
+                  strokeDashoffset={
+                    (2 * Math.PI * 30 * (100 - progressPercent)) / 100
+                  }
+                  strokeLinecap="round"
+                  rotation="-90"
+                  origin="36, 36"
+                />
+              </Svg>
+              <Text style={styles.progressPercent}>
+                {Math.round(progressPercent)}%
+              </Text>
+            </View>
+            <Text style={styles.modalTitle}>{progressTitle}</Text>
+            <Text style={styles.modalSubtitle}>{progressSubtitle}</Text>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -448,11 +546,49 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: fontWeight.semibold,
   },
-  progressText: {
-    marginBottom: spacing.sm,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 24, 39, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    padding: spacing.md,
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 6},
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
     fontSize: fontSize.small,
     color: colors.text.secondary,
     textAlign: 'center',
+  },
+  progressRing: {
+    width: 72,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressPercent: {
+    position: 'absolute',
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
   },
   debugButton: {
     marginTop: spacing.sm,
