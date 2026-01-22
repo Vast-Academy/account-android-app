@@ -238,6 +238,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const scrollViewRef = useRef(null);
   const requestAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
+  const renameInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
@@ -467,6 +468,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     setTimeout(focus, 600);
   }, []);
 
+  const focusRenameInput = useCallback(() => {
+    const focus = () => renameInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
   useEffect(() => {
     if (!withdrawModalVisible) {
       return;
@@ -486,6 +497,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }, 250);
     return () => clearTimeout(timer);
   }, [requestModalVisible, focusRequestAmountInput]);
+
+  useEffect(() => {
+    if (!renameModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusRenameInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [renameModalVisible, focusRenameInput]);
 
   const ensureReceiptsDir = useCallback(async () => {
     const receiptsDir = `${RNFS.DocumentDirectoryPath}/receipts`;
@@ -3144,6 +3165,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
               value={newAccountName}
               onChangeText={setNewAccountName}
               editable={!loading}
+              autoFocus
+              showSoftInputOnFocus
+              ref={renameInputRef}
             />
             <TouchableOpacity
               style={[styles.modalAddButton, loading && styles.buttonDisabled]}

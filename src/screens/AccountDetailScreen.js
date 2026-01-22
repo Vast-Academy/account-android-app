@@ -249,6 +249,7 @@ const AccountDetailScreen = ({route, navigation}) => {
   const scrollViewRef = useRef(null);
   const addAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
+  const renameInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
@@ -709,6 +710,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     withdrawModalVisible,
     editAmountVisible,
     editRemarkVisible,
+    renameModalVisible,
     modalSlideAnim,
   ]);
 
@@ -813,6 +815,16 @@ const AccountDetailScreen = ({route, navigation}) => {
     setTimeout(focus, 600);
   }, []);
 
+  const focusRenameInput = useCallback(() => {
+    const focus = () => renameInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
   useEffect(() => {
     if (!addModalVisible) {
       return;
@@ -832,6 +844,16 @@ const AccountDetailScreen = ({route, navigation}) => {
     }, 250);
     return () => clearTimeout(timer);
   }, [withdrawModalVisible, focusWithdrawAmountInput]);
+
+  useEffect(() => {
+    if (!renameModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusRenameInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [renameModalVisible, focusRenameInput]);
 
   const handleTogglePrimary = async () => {
     try {
@@ -3267,6 +3289,9 @@ const AccountDetailScreen = ({route, navigation}) => {
               value={newAccountName}
               onChangeText={setNewAccountName}
               editable={!loading}
+              autoFocus
+              showSoftInputOnFocus
+              ref={renameInputRef}
             />
             <TouchableOpacity
               style={[styles.modalAddButton, loading && styles.buttonDisabled]}

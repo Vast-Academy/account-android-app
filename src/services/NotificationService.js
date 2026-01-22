@@ -2,6 +2,8 @@ import notifee, {
   AndroidImportance,
   AndroidVisibility,
   EventType,
+  TriggerType,
+  RepeatFrequency,
 } from '@notifee/react-native';
 import {Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -59,9 +61,9 @@ class NotificationService {
           },
         },
         {
-          type: notifee.TriggerType.TIMESTAMP,
+          type: TriggerType.TIMESTAMP,
           timestamp: NotificationService.getNextTriggerTime(hour, minute),
-          repeatFrequency: notifee.RepeatFrequency.DAILY,
+          repeatFrequency: RepeatFrequency.DAILY,
         },
       );
     };
