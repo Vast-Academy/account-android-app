@@ -651,6 +651,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       title: 'Notification Settings',
       icon: 'notifications-outline',
       onPress: () => {
+        skipNextSlideInRef.current = true;
         navigation.navigate('NotificationSettings');
       },
     },
@@ -1098,10 +1099,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
-    padding: spacing.md,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
     marginHorizontal: spacing.md,
     marginBottom: spacing.lg,
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: colors.error,
   },

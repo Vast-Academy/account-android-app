@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Pressable,
   Modal,
   TextInput,
   Alert,
@@ -24,14 +23,22 @@ import {
   getTransactionsByContact,
   calculateContactBalance,
 } from '../services/ledgerDatabase';
-import {initAccountsDatabase, getAccountsByType} from '../services/accountsDatabase';
+import {
+  initAccountsDatabase,
+  getPrimaryEarningAccount,
+} from '../services/accountsDatabase';
 import {
   initTransactionsDatabase,
   createTransaction as createAccountTransaction,
 } from '../services/transactionsDatabase';
 
 const LEDGER_GET_DEFAULT_MODE_KEY = 'ledgerGetDefaultMode';
-const LEDGER_TRANSFER_LAST_ACCOUNT_KEY = 'ledgerTransferLastAccountId';
+const LEDGER_GET_DEFAULT_PREFIX = 'ledgerGetDefault:';
+const LEDGER_GET_DEFAULT_WITHDRAW = 'withdraw';
+const LEDGER_GET_DEFAULT_TRANSFER = 'transfer';
+const LEDGER_PAID_DEFAULT_PREFIX = 'ledgerPaidDefault:';
+const LEDGER_PAID_DEFAULT_DEBIT = 'debit';
+const LEDGER_PAID_DEFAULT_RECORD = 'record';
 
 const LedgerContactDetailScreen = ({route, navigation}) => {
   const {contact} = route.params || {};
@@ -52,11 +59,13 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const [loading, setLoading] = useState(false);
   const [getMode, setGetMode] = useState(null);
   const [getDefaultMode, setGetDefaultMode] = useState(null);
-  const [transferSelectVisible, setTransferSelectVisible] = useState(false);
-  const [transferAccounts, setTransferAccounts] = useState([]);
-  const [transferTarget, setTransferTarget] = useState(null);
-  const [amountFieldHeight, setAmountFieldHeight] = useState(0);
-  const [amountAccountWidth, setAmountAccountWidth] = useState(0);
+  const [paidPromptVisible, setPaidPromptVisible] = useState(false);
+  const [primaryEarningAccount, setPrimaryEarningAccount] = useState(null);
+  const [rememberPaidChoice, setRememberPaidChoice] = useState(false);
+  const [paidDefaultChoice, setPaidDefaultChoice] = useState(null);
+  const [getPromptVisible, setGetPromptVisible] = useState(false);
+  const [rememberGetChoice, setRememberGetChoice] = useState(false);
+  const [getDefaultChoice, setGetDefaultChoice] = useState(null);
 
   // Animation values
   const modalSlideAnim = useRef(new Animated.Value(300)).current;
@@ -117,37 +126,62 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       }
     } else {
       setGetMode(null);
-      setTransferSelectVisible(false);
     }
   }, [transactionModalVisible, transactionType, getDefaultMode]);
 
   useEffect(() => {
-    if (!transactionModalVisible || transactionType !== 'get' || getMode !== 'transfer') {
+    if (!transactionModalVisible || (transactionType !== 'paid' && transactionType !== 'get')) {
       return;
     }
-    const loadTransferAccounts = async () => {
+    const account = getPrimaryEarningAccount();
+    setPrimaryEarningAccount(account);
+  }, [transactionModalVisible, transactionType]);
+
+  useEffect(() => {
+    const loadGetDefaultChoice = async () => {
+      if (!contact?.recordID) {
+        setGetDefaultChoice(null);
+        return;
+      }
       try {
-        const accountsList = getAccountsByType('earning');
-        setTransferAccounts(accountsList);
-        if (accountsList.length === 0) {
-          setTransferTarget(null);
-          return;
-        }
-        const storedId = await AsyncStorage.getItem(
-          LEDGER_TRANSFER_LAST_ACCOUNT_KEY
+        const stored = await AsyncStorage.getItem(
+          `${LEDGER_GET_DEFAULT_PREFIX}${contact.recordID}`
         );
-        const selected =
-          accountsList.find(item => String(item.id) === storedId) ||
-          accountsList[0];
-        setTransferTarget(selected);
+        if (stored === LEDGER_GET_DEFAULT_WITHDRAW || stored === LEDGER_GET_DEFAULT_TRANSFER) {
+          setGetDefaultChoice(stored);
+        } else {
+          setGetDefaultChoice(null);
+        }
       } catch (error) {
-        console.error('Failed to load transfer accounts:', error);
-        setTransferAccounts([]);
-        setTransferTarget(null);
+        console.error('Failed to load ledger get default choice:', error);
+        setGetDefaultChoice(null);
       }
     };
-    loadTransferAccounts();
-  }, [transactionModalVisible, transactionType, getMode]);
+    loadGetDefaultChoice();
+  }, [contact?.recordID]);
+
+  useEffect(() => {
+    const loadPaidDefault = async () => {
+      if (!contact?.recordID) {
+        setPaidDefaultChoice(null);
+        return;
+      }
+      try {
+        const stored = await AsyncStorage.getItem(
+          `${LEDGER_PAID_DEFAULT_PREFIX}${contact.recordID}`
+        );
+        if (stored === LEDGER_PAID_DEFAULT_DEBIT || stored === LEDGER_PAID_DEFAULT_RECORD) {
+          setPaidDefaultChoice(stored);
+        } else {
+          setPaidDefaultChoice(null);
+        }
+      } catch (error) {
+        console.error('Failed to load ledger paid default choice:', error);
+        setPaidDefaultChoice(null);
+      }
+    };
+    loadPaidDefault();
+  }, [contact?.recordID]);
 
   const loadData = () => {
     if (!contact?.recordID) {
@@ -179,6 +213,9 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     setTransactionType(type);
     setAmount('');
     setNote('');
+    setRememberPaidChoice(false);
+    setRememberGetChoice(false);
+    setGetPromptVisible(false);
     setTransactionModalVisible(true);
     Animated.spring(modalSlideAnim, {
       toValue: 0,
@@ -198,7 +235,160 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       setTransactionModalVisible(false);
       setAmount('');
       setNote('');
+      setRememberPaidChoice(false);
+      setRememberGetChoice(false);
+      setGetPromptVisible(false);
     });
+  };
+
+  const resolvePrimaryEarningAccount = () => {
+    const account = getPrimaryEarningAccount();
+    setPrimaryEarningAccount(account);
+    return account;
+  };
+
+  const storePaidDefaultChoice = async choice => {
+    if (!rememberPaidChoice || !contact?.recordID) {
+      return;
+    }
+    try {
+      await AsyncStorage.setItem(
+        `${LEDGER_PAID_DEFAULT_PREFIX}${contact.recordID}`,
+        choice
+      );
+      setPaidDefaultChoice(choice);
+    } catch (error) {
+      console.error('Failed to save ledger paid default choice:', error);
+    }
+  };
+
+  const storeGetDefaultChoice = async choice => {
+    if (!rememberGetChoice || !contact?.recordID) {
+      return;
+    }
+    try {
+      await AsyncStorage.setItem(
+        `${LEDGER_GET_DEFAULT_PREFIX}${contact.recordID}`,
+        choice
+      );
+      setGetDefaultChoice(choice);
+    } catch (error) {
+      console.error('Failed to save ledger get default choice:', error);
+    }
+  };
+
+  const submitTransaction = async (debitPrimaryAccount, overrideGetMode = null) => {
+    setLoading(true);
+    try {
+      const amountValue = Number(amount);
+      const resolvedGetMode = overrideGetMode || getMode;
+      createLedgerTransaction(contact.recordID, amountValue, transactionType, note);
+      if (transactionType === 'get' && resolvedGetMode === 'transfer') {
+        const creditAccount = primaryEarningAccount || resolvePrimaryEarningAccount();
+        if (!creditAccount) {
+          Alert.alert(
+            'No Primary Account',
+            'Please set a primary earning account first.'
+          );
+          setLoading(false);
+          return;
+        }
+        const trimmedNote = note.trim();
+        const accountRemark = trimmedNote
+          ? `Ledger receipt from ${getContactName()} - ${trimmedNote}`
+          : `Ledger receipt from ${getContactName()}`;
+        await createAccountTransaction(
+          creditAccount.id,
+          amountValue,
+          accountRemark
+        );
+      }
+      if (transactionType === 'paid' && debitPrimaryAccount) {
+        const debitAccount = primaryEarningAccount || resolvePrimaryEarningAccount();
+        if (!debitAccount) {
+          Alert.alert(
+            'No Primary Account',
+            'Please set a primary earning account first.'
+          );
+          setLoading(false);
+          return;
+        }
+        const trimmedNote = note.trim();
+        const accountRemark = trimmedNote
+          ? `Ledger payment to ${getContactName()} - ${trimmedNote}`
+          : `Ledger payment to ${getContactName()}`;
+        await createAccountTransaction(
+          debitAccount.id,
+          -Math.abs(amountValue),
+          accountRemark
+        );
+      }
+      closeTransactionModal();
+      loadData();
+      if (transactionType === 'get' && resolvedGetMode === 'transfer') {
+        showToast('Receipt recorded and transferred successfully', 'success');
+      } else if (transactionType === 'paid' && debitPrimaryAccount) {
+        showToast('Payment recorded and deducted from primary account', 'success');
+      } else {
+        showToast(
+          `${transactionType === 'paid' ? 'Payment' : 'Receipt'} recorded successfully`,
+          'success'
+        );
+      }
+    } catch (error) {
+      console.error('Failed to add transaction:', error);
+      showToast('Failed to record transaction', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePaidPromptYes = async () => {
+    const account = resolvePrimaryEarningAccount();
+    if (!account) {
+      Alert.alert(
+        'No Primary Account',
+        'Please set a primary earning account first.'
+      );
+      return;
+    }
+    setPaidPromptVisible(false);
+    await storePaidDefaultChoice(LEDGER_PAID_DEFAULT_DEBIT);
+    await submitTransaction(true);
+  };
+
+  const handlePaidPromptNo = async () => {
+    setPaidPromptVisible(false);
+    await storePaidDefaultChoice(LEDGER_PAID_DEFAULT_RECORD);
+    await submitTransaction(false);
+  };
+
+  const handlePaidPromptCancel = () => {
+    setPaidPromptVisible(false);
+  };
+
+  const handleGetPromptWithdraw = async () => {
+    setGetPromptVisible(false);
+    await storeGetDefaultChoice(LEDGER_GET_DEFAULT_WITHDRAW);
+    await submitTransaction(false, LEDGER_GET_DEFAULT_WITHDRAW);
+  };
+
+  const handleGetPromptTransfer = async () => {
+    const account = resolvePrimaryEarningAccount();
+    if (!account) {
+      Alert.alert(
+        'No Primary Account',
+        'Please set a primary earning account first.'
+      );
+      return;
+    }
+    setGetPromptVisible(false);
+    await storeGetDefaultChoice(LEDGER_GET_DEFAULT_TRANSFER);
+    await submitTransaction(false, LEDGER_GET_DEFAULT_TRANSFER);
+  };
+
+  const handleGetPromptCancel = () => {
+    setGetPromptVisible(false);
   };
 
   const handleAddTransaction = async () => {
@@ -213,54 +403,40 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     }
 
     if (transactionType === 'get') {
-      if (!getMode) {
-        Alert.alert('Select Option', 'Please select Withdraw or Transfer first.');
+      if (getDefaultChoice === LEDGER_GET_DEFAULT_WITHDRAW) {
+        await submitTransaction(false, LEDGER_GET_DEFAULT_WITHDRAW);
         return;
       }
-      if (getMode === 'transfer' && !transferTarget) {
-        Alert.alert('Select Account', 'Please select an earning account.');
+      if (getDefaultChoice === LEDGER_GET_DEFAULT_TRANSFER) {
+        await submitTransaction(false, LEDGER_GET_DEFAULT_TRANSFER);
         return;
       }
+      if (
+        getDefaultMode === LEDGER_GET_DEFAULT_WITHDRAW ||
+        getDefaultMode === LEDGER_GET_DEFAULT_TRANSFER
+      ) {
+        await submitTransaction(false, getDefaultMode);
+        return;
+      }
+      setGetPromptVisible(true);
+      return;
     }
 
-    setLoading(true);
-    try {
-      const amountValue = Number(amount);
-      createLedgerTransaction(contact.recordID, amountValue, transactionType, note);
-      if (transactionType === 'get' && getMode === 'transfer' && transferTarget) {
-        const trimmedNote = note.trim();
-        const accountRemark = trimmedNote
-          ? `Ledger receipt from ${getContactName()} - ${trimmedNote}`
-          : `Ledger receipt from ${getContactName()}`;
-        await createAccountTransaction(
-          transferTarget.id,
-          amountValue,
-          accountRemark
-        );
-        setTransferSelectVisible(false);
-        AsyncStorage.setItem(
-          LEDGER_TRANSFER_LAST_ACCOUNT_KEY,
-          String(transferTarget.id)
-        ).catch(error => {
-          console.error('Failed to save ledger transfer account:', error);
-        });
+    if (transactionType === 'paid') {
+      resolvePrimaryEarningAccount();
+      if (paidDefaultChoice === LEDGER_PAID_DEFAULT_DEBIT) {
+        await submitTransaction(true);
+        return;
       }
-      closeTransactionModal();
-      loadData();
-      if (transactionType === 'get' && getMode === 'transfer') {
-        showToast('Receipt recorded and transferred successfully', 'success');
-      } else {
-        showToast(
-          `${transactionType === 'paid' ? 'Payment' : 'Receipt'} recorded successfully`,
-          'success'
-        );
+      if (paidDefaultChoice === LEDGER_PAID_DEFAULT_RECORD) {
+        await submitTransaction(false);
+        return;
       }
-    } catch (error) {
-      console.error('Failed to add transaction:', error);
-      showToast('Failed to record transaction', 'error');
-    } finally {
-      setLoading(false);
+      setPaidPromptVisible(true);
+      return;
     }
+
+    await submitTransaction(false);
   };
 
   const formatCurrency = amount => {
@@ -464,194 +640,20 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
               styles.modalContainer,
               {transform: [{translateY: modalSlideAnim}]},
             ]}>
-            {transferSelectVisible && (
-              <Pressable
-                style={styles.transferDismissOverlay}
-                onPress={() => setTransferSelectVisible(false)}
-              />
-            )}
             <View style={styles.modalContent}>
               <View style={styles.modalHandle} />
-              {transactionType === 'get' && (
-                <>
-                  <View style={styles.modeToggle}>
-                    <View style={styles.modeOption}>
-                      <TouchableOpacity
-                        style={[
-                          styles.modeButton,
-                          getMode === 'withdraw' && styles.modeButtonActive,
-                        ]}
-                        onPress={() => setGetMode('withdraw')}>
-                        <View style={styles.modeButtonContent}>
-                          <Text
-                            style={[
-                              styles.modeButtonText,
-                              getMode === 'withdraw' && styles.modeButtonTextActive,
-                            ]}>
-                            Withdraw
-                          </Text>
-                          {getDefaultMode === 'withdraw' && (
-                            <View style={styles.defaultBadge}>
-                              <Text style={styles.defaultBadgeText}>Default</Text>
-                            </View>
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.modeOption}>
-                      <TouchableOpacity
-                        style={[
-                          styles.modeButton,
-                          getMode === 'transfer' && styles.modeButtonActive,
-                        ]}
-                        onPress={() => setGetMode('transfer')}>
-                        <View style={styles.modeButtonContent}>
-                          <Text
-                            style={[
-                              styles.modeButtonText,
-                              getMode === 'transfer' && styles.modeButtonTextActive,
-                            ]}>
-                            Transfer
-                          </Text>
-                          {getDefaultMode === 'transfer' && (
-                            <View style={styles.defaultBadge}>
-                              <Text style={styles.defaultBadgeText}>Default</Text>
-                            </View>
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  {getMode && getMode !== getDefaultMode && (
-                    <TouchableOpacity
-                      style={styles.setDefaultButton}
-                      onPress={() => {
-                        const message =
-                          getMode === 'withdraw'
-                            ? 'Now withdraw is your default option.'
-                            : 'Now transfer is your default option.';
-                        showToast(message, 'success');
-                        AsyncStorage.setItem(LEDGER_GET_DEFAULT_MODE_KEY, getMode)
-                          .then(() => {
-                            setGetDefaultMode(getMode);
-                          })
-                          .catch(error => {
-                            console.error('Failed to save ledger get default mode:', error);
-                          });
-                      }}>
-                      <Text style={styles.setDefaultText}>Set as default</Text>
-                    </TouchableOpacity>
-                  )}
-                </>
-              )}
               <Text style={styles.modalTitle}>
-                {transactionType === 'paid'
-                  ? 'Paid'
-                  : getMode === 'transfer'
-                  ? 'Transfer'
-                  : 'Withdraw'}
+                {transactionType === 'paid' ? 'Paid' : 'Get'}
               </Text>
-              {transactionType === 'get' && getMode === 'transfer' ? (
-                <View style={styles.amountFieldWrapper}>
-                  <View
-                    style={styles.amountFieldRow}
-                    onLayout={event =>
-                      setAmountFieldHeight(event.nativeEvent.layout.height)
-                    }>
-                    <TextInput
-                      ref={amountInputRef}
-                      style={styles.amountInputBare}
-                      value={amount}
-                      onChangeText={setAmount}
-                      keyboardType="numeric"
-                      editable={!loading}
-                      onSubmitEditing={() => noteInputRef.current?.focus()}
-                    />
-                    <View style={styles.amountFieldDivider} />
-                    <TouchableOpacity
-                      style={styles.amountAccountButton}
-                      onPress={() =>
-                        setTransferSelectVisible(current => !current)
-                      }
-                      onLayout={event =>
-                        setAmountAccountWidth(event.nativeEvent.layout.width)
-                      }
-                      disabled={transferAccounts.length === 0}>
-                      <Text style={styles.amountAccountText} numberOfLines={1}>
-                        {transferTarget?.account_name ||
-                          (transferAccounts.length
-                            ? 'Select account'
-                            : 'No accounts')}
-                      </Text>
-                      <Icon
-                        name="chevron-down"
-                        size={16}
-                        color={colors.text.secondary}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                  {transferSelectVisible && (
-                    <View
-                      style={[
-                        styles.floatingAccountList,
-                        {
-                          bottom: amountFieldHeight + 6,
-                          right: 0,
-                          width: amountAccountWidth || 140,
-                        },
-                      ]}>
-                      <ScrollView
-                        style={styles.floatingAccountScroll}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled">
-                        {transferAccounts.map(item => {
-                          const isSelected = transferTarget?.id === item.id;
-                          const itemColor =
-                            item.icon_color || colors.text.primary;
-                          return (
-                            <TouchableOpacity
-                              key={item.id}
-                              style={[
-                                styles.floatingAccountItem,
-                                isSelected && styles.floatingAccountItemSelected,
-                              ]}
-                              onPress={() => {
-                                setTransferTarget(item);
-                                setTransferSelectVisible(false);
-                              }}>
-                              <Text
-                                style={[
-                                  styles.floatingAccountText,
-                                  {color: itemColor},
-                                  isSelected && styles.floatingAccountTextSelected,
-                                ]}>
-                                {item.account_name}
-                              </Text>
-                              {isSelected && (
-                                <Icon
-                                  name="checkmark-circle"
-                                  size={16}
-                                  color={itemColor}
-                                />
-                              )}
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              ) : (
-                <TextInput
-                  ref={amountInputRef}
-                  style={styles.modalAmountInput}
-                  value={amount}
-                  onChangeText={setAmount}
-                  keyboardType="numeric"
-                  editable={!loading}
-                  onSubmitEditing={() => noteInputRef.current?.focus()}
-                />
-              )}
+              <TextInput
+                ref={amountInputRef}
+                style={styles.modalAmountInput}
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                editable={!loading}
+                onSubmitEditing={() => noteInputRef.current?.focus()}
+              />
               <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
               <TextInput
                 ref={noteInputRef}
@@ -680,14 +682,184 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
                   <Text style={styles.modalAddButtonText}>
                     {transactionType === 'paid'
                       ? 'Record Payment'
-                      : getMode === 'transfer'
-                      ? 'Transfer'
                       : 'Record Receipt'}
                   </Text>
                 )}
               </TouchableOpacity>
             </View>
           </Animated.View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={getPromptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setGetPromptVisible(false)}>
+        <View style={styles.promptOverlay}>
+          <TouchableOpacity
+            style={styles.promptBackdrop}
+            activeOpacity={1}
+            onPress={handleGetPromptCancel}
+          />
+          <View style={styles.promptCard}>
+            <TouchableOpacity
+              style={styles.promptCloseButton}
+              onPress={handleGetPromptCancel}
+              disabled={loading}
+              hitSlop={{top: 24, bottom: 24, left: 24, right: 24}}>
+              <Icon name="close" size={20} color={colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.promptTitle}>How should we record this?</Text>
+            <Text style={styles.promptMessage}>
+              Record{' '}
+              <Text style={styles.promptAmount}>
+                {formatCurrency(Number(amount) || 0)}
+              </Text>{' '}
+              or transfer to your primary{' '}
+              <Text
+                style={[
+                  styles.promptAccountName,
+                  primaryEarningAccount?.icon_color && {
+                    color: primaryEarningAccount.icon_color,
+                  },
+                ]}>
+                {primaryEarningAccount?.account_name || 'earning'}
+              </Text>{' '}
+              account?
+            </Text>
+            <TouchableOpacity
+              style={styles.promptRemember}
+              onPress={() =>
+                setRememberGetChoice(current => !current)
+              }
+              disabled={loading}>
+              <View
+                style={[
+                  styles.promptCheckbox,
+                  rememberGetChoice && styles.promptCheckboxChecked,
+                  rememberGetChoice &&
+                    primaryEarningAccount?.icon_color && {
+                      backgroundColor: primaryEarningAccount.icon_color,
+                      borderColor: primaryEarningAccount.icon_color,
+                    },
+                ]}>
+                {rememberGetChoice && (
+                  <Icon name="checkmark" size={14} color={colors.white} />
+                )}
+              </View>
+              <Text style={styles.promptRememberText}>
+                Remember my choice for this contact
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.promptActions}>
+              <TouchableOpacity
+                style={[styles.promptButton, styles.promptButtonSecondary]}
+                onPress={handleGetPromptWithdraw}
+                disabled={loading}>
+                <Text style={styles.promptButtonTextSecondary}>Withdraw</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.promptButton,
+                  styles.promptButtonPrimary,
+                  primaryEarningAccount?.icon_color && {
+                    backgroundColor: primaryEarningAccount.icon_color,
+                  },
+                ]}
+                onPress={handleGetPromptTransfer}
+                disabled={loading}>
+                <Text style={styles.promptButtonTextPrimary}>Transfer</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={paidPromptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPaidPromptVisible(false)}>
+        <View style={styles.promptOverlay}>
+          <TouchableOpacity
+            style={styles.promptBackdrop}
+            activeOpacity={1}
+            onPress={handlePaidPromptCancel}
+          />
+          <View style={styles.promptCard}>
+            <TouchableOpacity
+              style={styles.promptCloseButton}
+              onPress={handlePaidPromptCancel}
+              disabled={loading}
+              hitSlop={{top: 24, bottom: 24, left: 24, right: 24}}>
+              <Icon name="close" size={20} color={colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.promptTitle}>Get from primary account?</Text>
+            <Text style={styles.promptMessage}>
+              Do you want to get{' '}
+              <Text style={styles.promptAmount}>
+                {formatCurrency(Number(amount) || 0)}
+              </Text>{' '}
+              from{' '}
+              primary earning account{' '}
+              <Text
+                style={[
+                  styles.promptAccountName,
+                  primaryEarningAccount?.icon_color && {
+                    color: primaryEarningAccount.icon_color,
+                  },
+                ]}>
+                {primaryEarningAccount?.account_name || 'primary earning account'}
+              </Text>{' '}
+              for payment to{' '}
+              <Text style={styles.promptAccountName}>{getContactName()}</Text>?
+            </Text>
+            <TouchableOpacity
+              style={styles.promptRemember}
+              onPress={() =>
+                setRememberPaidChoice(current => !current)
+              }
+              disabled={loading}>
+              <View
+                style={[
+                  styles.promptCheckbox,
+                  rememberPaidChoice && styles.promptCheckboxChecked,
+                  rememberPaidChoice &&
+                    primaryEarningAccount?.icon_color && {
+                      backgroundColor: primaryEarningAccount.icon_color,
+                      borderColor: primaryEarningAccount.icon_color,
+                    },
+                ]}>
+                {rememberPaidChoice && (
+                  <Icon name="checkmark" size={14} color={colors.white} />
+                )}
+              </View>
+              <Text style={styles.promptRememberText}>
+                Remember my choice for this contact
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.promptActions}>
+              <TouchableOpacity
+                style={[styles.promptButton, styles.promptButtonSecondary]}
+                onPress={handlePaidPromptNo}
+                disabled={loading}>
+                <Text style={styles.promptButtonTextSecondary}>Just record</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.promptButton,
+                  styles.promptButtonPrimary,
+                  primaryEarningAccount?.icon_color && {
+                    backgroundColor: primaryEarningAccount.icon_color,
+                  },
+                ]}
+                onPress={handlePaidPromptYes}
+                disabled={loading}>
+                <Text style={styles.promptButtonTextPrimary}>Get</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -1179,6 +1351,99 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  promptOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  promptBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  promptCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: spacing.md,
+    position: 'relative',
+  },
+  promptCloseButton: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    padding: 6,
+  },
+  promptTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  promptMessage: {
+    fontSize: fontSize.medium,
+    color: colors.text.secondary,
+    marginBottom: spacing.md,
+  },
+  promptAccountName: {
+    fontWeight: fontWeight.semibold,
+  },
+  promptAmount: {
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+  },
+  promptRemember: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: spacing.md,
+  },
+  promptCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+  },
+  promptCheckboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  promptRememberText: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  promptActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  promptButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  promptButtonSecondary: {
+    backgroundColor: '#F3F4F6',
+  },
+  promptButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  promptButtonTextSecondary: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  promptButtonTextPrimary: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.white,
   },
 });
 

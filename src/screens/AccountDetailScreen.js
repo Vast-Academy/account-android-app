@@ -14,6 +14,7 @@ import {
   Animated,
   Easing,
   Keyboard,
+  KeyboardAvoidingView,
   InteractionManager,
   PermissionsAndroid,
   Platform,
@@ -221,15 +222,11 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [editRemark, setEditRemark] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawNote, setWithdrawNote] = useState('');
-  const [withdrawMode, setWithdrawMode] = useState(null);
-  const [withdrawDefaultMode, setWithdrawDefaultMode] = useState(null);
-  const [hasDefaultPrompted, setHasDefaultPrompted] = useState(false);
   const [transferSelectVisible, setTransferSelectVisible] = useState(false);
+  const [transferAccountModalVisible, setTransferAccountModalVisible] = useState(false);
   const [transferAccounts, setTransferAccounts] = useState([]);
   const [transferTarget, setTransferTarget] = useState(null);
   const [transferAmount, setTransferAmount] = useState(0);
-  const [amountFieldHeight, setAmountFieldHeight] = useState(0);
-  const [amountAccountWidth, setAmountAccountWidth] = useState(0);
   const [entryDate, setEntryDate] = useState(new Date());
   const [showEntryDatePicker, setShowEntryDatePicker] = useState(false);
   const [showEntryTimePicker, setShowEntryTimePicker] = useState(false);
@@ -249,78 +246,14 @@ const AccountDetailScreen = ({route, navigation}) => {
   const scrollViewRef = useRef(null);
   const addAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
+  const renameInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
   const menuOverlayOpacity = useRef(new Animated.Value(0)).current;
   const menuContentTranslateY = useRef(new Animated.Value(300)).current;
-  const withdrawPulse = useRef(new Animated.Value(0)).current;
-  const transferPulse = useRef(new Animated.Value(0)).current;
-  const defaultPulse = useRef(new Animated.Value(0)).current;
-  const pulseAnimationRef = useRef(null);
 
-  const clearPulseAnimation = useCallback(() => {
-    if (pulseAnimationRef.current) {
-      pulseAnimationRef.current.stop();
-      pulseAnimationRef.current = null;
-    }
-    withdrawPulse.setValue(0);
-    transferPulse.setValue(0);
-    defaultPulse.setValue(0);
-  }, [withdrawPulse, transferPulse, defaultPulse]);
 
-  const runModeHighlightSequence = useCallback(() => {
-    const pulseOnce = target =>
-      Animated.sequence([
-        Animated.timing(target, {
-          toValue: 1,
-          duration: 180,
-          useNativeDriver: false,
-        }),
-        Animated.timing(target, {
-          toValue: 0,
-          duration: 180,
-          useNativeDriver: false,
-        }),
-      ]);
-
-    clearPulseAnimation();
-    const sequence = Animated.sequence([
-      pulseOnce(withdrawPulse),
-      pulseOnce(transferPulse),
-      pulseOnce(withdrawPulse),
-    ]);
-    pulseAnimationRef.current = sequence;
-    sequence.start(({finished}) => {
-      if (finished) {
-        pulseAnimationRef.current = null;
-      }
-    });
-  }, [clearPulseAnimation, withdrawPulse, transferPulse]);
-
-  const runDefaultHighlight = useCallback(() => {
-    const pulseUpMs = 300;
-    const pulseDownMs = 300;
-    const pulses = 5;
-    const steps = [];
-    for (let i = 0; i < pulses; i += 1) {
-      steps.push(
-        Animated.timing(defaultPulse, {
-          toValue: 1,
-          duration: pulseUpMs,
-          useNativeDriver: false,
-        })
-      );
-      steps.push(
-        Animated.timing(defaultPulse, {
-          toValue: 0,
-          duration: pulseDownMs,
-          useNativeDriver: false,
-        })
-      );
-    }
-    Animated.sequence(steps).start();
-  }, [defaultPulse]);
 
   const ensureReceiptsDir = useCallback(async () => {
     const receiptsDir = `${RNFS.DocumentDirectoryPath}/receipts`;
@@ -614,43 +547,16 @@ const AccountDetailScreen = ({route, navigation}) => {
   }, [transactions]);
 
   useEffect(() => {
-    const loadWithdrawDefault = async () => {
-      try {
-        const stored = await AsyncStorage.getItem('withdrawDefaultMode');
-        if (stored === 'withdraw' || stored === 'transfer') {
-          setWithdrawDefaultMode(stored);
-        }
-      } catch (error) {
-        console.error('Failed to load withdraw default mode:', error);
-      }
-    };
-    loadWithdrawDefault();
-  }, []);
-
-  useEffect(() => {
-    if (withdrawModalVisible) {
-      if (withdrawDefaultMode) {
-        setWithdrawMode(withdrawDefaultMode);
-      }
-    } else {
-      setWithdrawMode(null);
+    if (!withdrawModalVisible) {
       setWithdrawAmount('');
       setWithdrawNote('');
       setWithdrawReceiptUri('');
       setTransferSelectVisible(false);
-      clearPulseAnimation();
-      setHasDefaultPrompted(false);
     }
-  }, [withdrawModalVisible, withdrawDefaultMode, clearPulseAnimation]);
+  }, [withdrawModalVisible]);
 
   useEffect(() => {
-    if (withdrawMode === 'transfer') {
-      setWithdrawReceiptUri('');
-    }
-  }, [withdrawMode]);
-
-  useEffect(() => {
-    if (!withdrawModalVisible || withdrawMode !== 'transfer') {
+    if (!withdrawModalVisible) { // Load accounts only when modal is visible
       return;
     }
     const loadTransferAccounts = async () => {
@@ -677,7 +583,7 @@ const AccountDetailScreen = ({route, navigation}) => {
       }
     };
     loadTransferAccounts();
-  }, [withdrawModalVisible, withdrawMode, account.id]);
+  }, [withdrawModalVisible, account.id]);
 
   useEffect(() => {
     if (addModalVisible || withdrawModalVisible) {
@@ -709,6 +615,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     withdrawModalVisible,
     editAmountVisible,
     editRemarkVisible,
+    renameModalVisible,
     modalSlideAnim,
   ]);
 
@@ -813,6 +720,16 @@ const AccountDetailScreen = ({route, navigation}) => {
     setTimeout(focus, 600);
   }, []);
 
+  const focusRenameInput = useCallback(() => {
+    const focus = () => renameInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
   useEffect(() => {
     if (!addModalVisible) {
       return;
@@ -832,6 +749,16 @@ const AccountDetailScreen = ({route, navigation}) => {
     }, 250);
     return () => clearTimeout(timer);
   }, [withdrawModalVisible, focusWithdrawAmountInput]);
+
+  useEffect(() => {
+    if (!renameModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusRenameInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [renameModalVisible, focusRenameInput]);
 
   const handleTogglePrimary = async () => {
     try {
@@ -1995,7 +1922,6 @@ const AccountDetailScreen = ({route, navigation}) => {
   const showEntryDateTime = scheduleType === 'once';
   const showDayPicker = scheduleType === 'weekly' || scheduleType === '2weeks';
   const showDatePicker = ['monthly', '2months', '3months', '6months'].includes(scheduleType);
-  const isTransferModeActive = withdrawMode === 'transfer';
   const renderReceiptPreviewHeader = useCallback(() => {
     return (
       <View style={styles.previewHeader}>
@@ -2194,22 +2120,20 @@ const AccountDetailScreen = ({route, navigation}) => {
         {/* Received and Given Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={styles.receivedButton}
+            style={styles.earningPrimaryButton}
             onPress={() => {
               setWithdrawModalVisible(true);
               focusWithdrawAmountInput();
             }}>
-            <Icon name="arrow-down" size={20} color="#EF4444" />
-            <Text style={styles.receivedButtonText}>Withdraw / Transfer</Text>
+            <Text style={styles.earningPrimaryText}>Withdraw / Transfer</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.givenButton}
+            style={styles.earningSecondaryButton}
             onPress={() => {
               setAddModalVisible(true);
               focusAddAmountInput();
             }}>
-            <Icon name="arrow-up" size={20} color="#10B981" />
-            <Text style={styles.givenButtonText}>Add Ammount</Text>
+            <Text style={styles.earningSecondaryTextDark}>Add Ammount</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -2217,373 +2141,206 @@ const AccountDetailScreen = ({route, navigation}) => {
       <Modal
         visible={addModalVisible}
         transparent
-        animationType="none"
+        animationType="slide"
         onRequestClose={() => setAddModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => {
-              setAddModalVisible(false);
-              setAddNote('');
-              setAmount('');
-            }}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Add Amount</Text>
+        <KeyboardAvoidingView
+          style={styles.addFullScreen}
+          behavior="padding">
+          <View style={styles.addHeader}>
+            <TouchableOpacity
+              style={styles.addHeaderButton}
+              onPress={() => {
+                setAddModalVisible(false);
+                setAddNote('');
+                setAmount('');
+              }}>
+              <Icon name="arrow-back" size={22} color={colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.addHeaderTitle}>Add Amount</Text>
+            <View style={styles.addHeaderSpacer} />
+          </View>
+          <View style={styles.addContent}>
+            <View style={styles.addCenterBlock}>
+              <View style={styles.addAmountBlock}>
+                <Text style={styles.addCurrencySymbol}>{currencySymbol}</Text>
             <TextInput
-              style={styles.modalAmountInput}
+              style={styles.addAmountInput}
               value={amount}
               onChangeText={setAmount}
               keyboardType="numeric"
-                autoFocus
-                ref={addAmountInputRef}
-                showSoftInputOnFocus
-                editable={!loading}
-                onLayout={focusAddAmountInput}
-              />
-            {showEntryDateTime && (
-              <View style={styles.entryDateTimeRow}>
-                <TouchableOpacity
-                  style={styles.entryDateTimeButton}
-                  onPress={() => setShowEntryDatePicker(true)}>
-                  <Text style={styles.entryDateTimeLabel}>Date</Text>
-                  <Text style={styles.entryDateTimeValue}>
-                    {formatEntryDate(entryDate)}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.entryDateTimeButton}
-                  onPress={() => setShowEntryTimePicker(true)}>
-                  <Text style={styles.entryDateTimeLabel}>Time</Text>
-                  <Text style={styles.entryDateTimeValue}>
-                    {formatEntryTime(entryDate)}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {showEntryDatePicker && (
-              <DateTimePicker
-                value={entryDate}
-                mode="date"
-                display="default"
-                maximumDate={new Date()}
-                onChange={handleEntryDateChange}
-              />
-            )}
-            {showEntryTimePicker && (
-              <DateTimePicker
-                value={entryDate}
-                mode="time"
-                display="default"
-                maximumDate={new Date()}
-                onChange={handleEntryTimeChange}
-              />
-            )}
-            <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
-            <TextInput
-              style={styles.modalNoteInput}
-              value={addNote}
-              onChangeText={setAddNote}
-              placeholder="Add a note"
-              placeholderTextColor={colors.text.light}
-              multiline
-              numberOfLines={3}
+              placeholder="0"
+              placeholderTextColor="#C0C4CC"
+              autoFocus
+              ref={addAmountInputRef}
+              showSoftInputOnFocus
               editable={!loading}
             />
-            <TouchableOpacity
-              style={[
-                styles.modalAddButton,
-                account.icon_color && {backgroundColor: account.icon_color},
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={async () => {
-                const didAdd = await handleAddEntry();
-                if (didAdd) {
-                  setAddModalVisible(false);
-                }
-              }}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalAddButtonText}>Add</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
+              </View>
+              <TextInput
+                style={styles.addNoteInput}
+                value={addNote}
+                onChangeText={setAddNote}
+                placeholder="Add note"
+                placeholderTextColor={colors.text.light}
+                multiline
+                numberOfLines={2}
+                editable={!loading}
+              />
+            </View>
+            <View style={styles.addBottomBlock}>
+              <View style={styles.addScheduleSection}>
+                {showEntryDateTime && (
+                  <View style={styles.entryDateTimeRow}>
+                    <TouchableOpacity
+                      style={styles.entryDateTimeButton}
+                      onPress={() => setShowEntryDatePicker(true)}>
+                      <Text style={styles.entryDateTimeLabel}>Date</Text>
+                      <Text style={styles.entryDateTimeValue}>
+                        {formatEntryDate(entryDate)}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.entryDateTimeButton}
+                      onPress={() => setShowEntryTimePicker(true)}>
+                      <Text style={styles.entryDateTimeLabel}>Time</Text>
+                      <Text style={styles.entryDateTimeValue}>
+                        {formatEntryTime(entryDate)}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {showEntryDatePicker && (
+                  <DateTimePicker
+                    value={entryDate}
+                    mode="date"
+                    display="default"
+                    maximumDate={new Date()}
+                    onChange={handleEntryDateChange}
+                  />
+                )}
+                {showEntryTimePicker && (
+                  <DateTimePicker
+                    value={entryDate}
+                    mode="time"
+                    display="default"
+                    maximumDate={new Date()}
+                    onChange={handleEntryTimeChange}
+                  />
+                )}
+              </View>
+              <View style={styles.addCtaContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.addCtaButton,
+                    loading && styles.buttonDisabled,
+                  ]}
+                  onPress={async () => {
+                    const didAdd = await handleAddEntry();
+                    if (didAdd) {
+                      setAddModalVisible(false);
+                    }
+                  }}
+                  disabled={loading}>
+                  {loading ? (
+                    <ActivityIndicator color={colors.text.primary} />
+                  ) : (
+                    <Text style={styles.addCtaText}>Add Amount</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
         visible={withdrawModalVisible}
         transparent
-        animationType="none"
+        animationType="slide"
         onRequestClose={() => setWithdrawModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => {
-              setWithdrawModalVisible(false);
-              setWithdrawAmount('');
-              setWithdrawNote('');
-            }}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            {transferSelectVisible && (
-              <Pressable
-                style={styles.transferDismissOverlay}
-                onPress={() => setTransferSelectVisible(false)}
-              />
-            )}
-            <View style={styles.modalContent}>
-              <View style={styles.modalHandle} />
-              <View style={styles.modeToggle}>
-                <View style={styles.modeOption}>
-                  <AnimatedTouchableOpacity
-                    style={[
-                      styles.modeButton,
-                      {
-                        backgroundColor: withdrawPulse.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['rgba(239, 68, 68, 0)', 'rgba(239, 68, 68, 0.12)'],
-                        }),
-                      },
-                      withdrawMode === 'withdraw' && styles.modeButtonActive,
-                    ]}
-                    onPress={() => {
-                      setWithdrawMode('withdraw');
-                      clearPulseAnimation();
-                      if (!withdrawDefaultMode && !hasDefaultPrompted) {
-                        runDefaultHighlight();
-                        setHasDefaultPrompted(true);
-                      }
-                    }}>
-                    <View style={styles.modeButtonContent}>
-                      <Text
-                        style={[
-                          styles.modeButtonText,
-                          withdrawMode === 'withdraw' && styles.modeButtonTextActive,
-                        ]}>
-                        Withdraw
-                      </Text>
-                      {withdrawDefaultMode === 'withdraw' && (
-                        <View style={styles.defaultBadge}>
-                          <Text style={styles.defaultBadgeText}>Default</Text>
-                        </View>
-                      )}
-                    </View>
-                  </AnimatedTouchableOpacity>
-                </View>
-                <View style={styles.modeOption}>
-                  <AnimatedTouchableOpacity
-                    style={[
-                      styles.modeButton,
-                      {
-                        backgroundColor: transferPulse.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['rgba(239, 68, 68, 0)', 'rgba(239, 68, 68, 0.12)'],
-                        }),
-                      },
-                      withdrawMode === 'transfer' && styles.modeButtonActive,
-                    ]}
-                    onPress={() => {
-                      setWithdrawMode('transfer');
-                      clearPulseAnimation();
-                      if (!withdrawDefaultMode && !hasDefaultPrompted) {
-                        runDefaultHighlight();
-                        setHasDefaultPrompted(true);
-                      }
-                    }}>
-                    <View style={styles.modeButtonContent}>
-                      <Text
-                        style={[
-                          styles.modeButtonText,
-                          withdrawMode === 'transfer' && styles.modeButtonTextActive,
-                        ]}>
-                        Transfer
-                      </Text>
-                      {withdrawDefaultMode === 'transfer' && (
-                        <View style={styles.defaultBadge}>
-                          <Text style={styles.defaultBadgeText}>Default</Text>
-                        </View>
-                      )}
-                    </View>
-                  </AnimatedTouchableOpacity>
-                </View>
-              </View>
-              {withdrawMode &&
-                withdrawMode !== withdrawDefaultMode && (
-                  <AnimatedTouchableOpacity
-                    style={styles.setDefaultButton}
-                    onPress={() => {
-                      const message =
-                        withdrawMode === 'withdraw'
-                          ? 'Now withdraw is your default option.'
-                          : 'Now transfer is your default option.';
-                      showToast(message, 'success');
-                      AsyncStorage.setItem('withdrawDefaultMode', withdrawMode)
-                        .then(() => {
-                          setWithdrawDefaultMode(withdrawMode);
-                        })
-                        .catch(error => {
-                          console.error('Failed to save withdraw default mode:', error);
-                        });
-                    }}>
-                    <Animated.View
-                      style={[
-                        styles.setDefaultGlow,
-                        {
-                          backgroundColor: defaultPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ['rgba(16, 185, 129, 0)', 'rgba(16, 185, 129, 0.14)'],
-                          }),
-                        },
-                      ]}>
-                      <Text style={styles.setDefaultText}>Set as default</Text>
-                    </Animated.View>
-                  </AnimatedTouchableOpacity>
-                )}
-              <Text style={styles.modalTitle}>
-                {withdrawMode === 'transfer' ? 'Transfer' : 'Withdraw'}
-              </Text>
-              {withdrawMode === 'transfer' ? (
-                <View style={styles.amountFieldWrapper}>
-                  <View
-                    style={styles.amountFieldRow}
-                    onLayout={event =>
-                      setAmountFieldHeight(event.nativeEvent.layout.height)
-                    }>
-                    <TextInput
-                      style={styles.amountInputBare}
-                      value={withdrawAmount}
-                      onChangeText={setWithdrawAmount}
-                      keyboardType="numeric"
-                      autoFocus
-                      ref={withdrawAmountInputRef}
-                      showSoftInputOnFocus
-                      editable={!loading}
-                    />
-                    <View style={styles.amountFieldDivider} />
-                    <TouchableOpacity
-                      style={styles.amountAccountButton}
-                      onPress={() =>
-                        setTransferSelectVisible(current => !current)
-                      }
-                      onLayout={event =>
-                        setAmountAccountWidth(event.nativeEvent.layout.width)
-                      }
-                      disabled={transferAccounts.length === 0}>
-                      <Text
-                        style={[
-                          styles.amountAccountText,
-                          transferTarget?.icon_color && {
-                            color: transferTarget.icon_color,
-                          },
-                        ]}
-                        numberOfLines={1}>
-                        {transferTarget?.account_name ||
-                          (transferAccounts.length
-                            ? 'Select account'
-                            : 'No accounts')}
-                      </Text>
-                      <Icon
-                        name="chevron-down"
-                        size={16}
-                        color={colors.text.secondary}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                  {transferSelectVisible && (
-                    <View
-                      style={[
-                        styles.floatingAccountList,
-                        {
-                          bottom: amountFieldHeight + 6,
-                          right: 0,
-                          width: amountAccountWidth || 140,
-                        },
-                      ]}>
-                      <ScrollView
-                        style={styles.floatingAccountScroll}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled">
-                        {transferAccounts.map(item => {
-                          const isSelected = transferTarget?.id === item.id;
-                          const itemColor =
-                            item.icon_color || colors.text.primary;
-                          return (
-                            <TouchableOpacity
-                              key={item.id}
-                              style={[
-                                styles.floatingAccountItem,
-                                isSelected && styles.floatingAccountItemSelected,
-                              ]}
-                              onPress={() => {
-                                setTransferTarget(item);
-                                setTransferSelectVisible(false);
-                              }}>
-                              <Text
-                                style={[
-                                  styles.floatingAccountText,
-                                  {color: itemColor},
-                                  isSelected && styles.floatingAccountTextSelected,
-                                ]}>
-                                {item.account_name}
-                              </Text>
-                              {isSelected && (
-                                <Icon
-                                  name="checkmark-circle"
-                                  size={16}
-                                  color={itemColor}
-                                />
-                              )}
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              ) : (
+        <KeyboardAvoidingView
+          style={styles.addFullScreen}
+          behavior="padding">
+          <View style={styles.addHeader}>
+            <TouchableOpacity
+              style={styles.addHeaderButton}
+              onPress={() => {
+                setWithdrawModalVisible(false);
+                setWithdrawAmount('');
+                setWithdrawNote('');
+                setTransferSelectVisible(false);
+              }}>
+              <Icon name="arrow-back" size={22} color={colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.addHeaderTitle}>Withdraw / Transfer</Text>
+            <View style={styles.addHeaderSpacer} />
+          </View>
+          <ScrollView contentContainerStyle={styles.withdrawScrollContainer} keyboardShouldPersistTaps="handled">
+            <View style={styles.withdrawCenterBlock}>
+              <View style={styles.withdrawAmountBlock}>
+                <Text style={styles.addCurrencySymbol}>{currencySymbol}</Text>
                 <TextInput
-                  style={styles.modalAmountInput}
+                  style={styles.addAmountInput}
                   value={withdrawAmount}
                   onChangeText={setWithdrawAmount}
                   keyboardType="numeric"
+                  placeholder="0"
+                  placeholderTextColor="#C0C4CC"
                   autoFocus
                   ref={withdrawAmountInputRef}
                   showSoftInputOnFocus
                   editable={!loading}
                 />
-              )}
+              </View>
+              <View style={styles.noteInputWithAttach}>
+                <TextInput
+                  style={[styles.withdrawNoteInput, {paddingRight: 40, paddingLeft: 40, textAlign: 'center'}]}
+                  value={withdrawNote}
+                  onChangeText={setWithdrawNote}
+                  placeholder="Add note"
+                  placeholderTextColor={colors.text.light}
+                  multiline
+                  numberOfLines={2}
+                  editable={!loading}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.attachButton,
+                    transferSelectVisible && styles.attachButtonDisabled,
+                  ]}
+                  onPress={handleAddReceipt}
+                  disabled={loading || transferSelectVisible}>
+                  <Icon
+                    name="camera-outline"
+                    size={20}
+                    color={
+                      transferSelectVisible
+                        ? colors.text.light
+                        : colors.text.secondary
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+              {withdrawReceiptUri ? (
+                <View style={styles.receiptPreviewRow}>
+                  <Pressable
+                    style={styles.receiptThumbWrapper}
+                    onPress={() => openReceiptPreview(withdrawReceiptUri)}>
+                    <Image
+                      source={{uri: normalizeImageUri(withdrawReceiptUri)}}
+                      style={styles.receiptThumb}
+                    />
+                  </Pressable>
+                  <TouchableOpacity
+                    style={styles.receiptRemoveButton}
+                    onPress={handleRemoveReceipt}>
+                    <Text style={styles.receiptRemoveText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+            </View>
+            <View style={styles.withdrawBottomBlock}>
               <View style={styles.entryDateTimeRow}>
                 <TouchableOpacity
                   style={styles.entryDateTimeButton}
@@ -2620,92 +2377,77 @@ const AccountDetailScreen = ({route, navigation}) => {
                   onChange={handleEntryTimeChange}
                 />
               )}
-              <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
-              <View style={styles.noteInputWithAttach}>
-                <TextInput
-                  style={[styles.modalNoteInput, styles.modalNoteInputPadded]}
-                  value={withdrawNote}
-                  onChangeText={setWithdrawNote}
-                  placeholder="Add a note"
-                  placeholderTextColor={colors.text.light}
-                  multiline
-                  numberOfLines={3}
-                  editable={!loading}
-                />
+              <View style={styles.withdrawActionButtons}>
                 <TouchableOpacity
-                  style={[
-                    styles.attachButton,
-                    isTransferModeActive && styles.attachButtonDisabled,
-                  ]}
-                  onPress={handleAddReceipt}
-                  disabled={loading || isTransferModeActive}>
-                  <Icon
-                    name="attach-outline"
-                    size={20}
-                    color={
-                      isTransferModeActive
-                        ? colors.text.light
-                        : colors.text.secondary
+                  style={styles.withdrawSecondaryButton}
+                  onPress={() => {
+                    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+                        showToast('Please enter a valid amount.', 'error');
+                        return;
                     }
-                  />
+                    setTransferSelectVisible(true);
+                  }}
+                  disabled={loading}>
+                  {loading ? (
+                    <ActivityIndicator color="#1D4ED8" />
+                  ) : (
+                    <Text style={styles.withdrawSecondaryText}>Transfer</Text>
+                  )}
                 </TouchableOpacity>
-              </View>
-              {withdrawReceiptUri ? (
-                <View style={styles.receiptPreviewRow}>
-                  <Pressable
-                    style={styles.receiptThumbWrapper}
-                    onPress={() => openReceiptPreview(withdrawReceiptUri)}>
-                    <Image
-                      source={{uri: normalizeImageUri(withdrawReceiptUri)}}
-                      style={styles.receiptThumb}
-                    />
-                  </Pressable>
-                  <TouchableOpacity
-                    style={styles.receiptRemoveButton}
-                    onPress={handleRemoveReceipt}>
-                    <Text style={styles.receiptRemoveText}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-              <TouchableOpacity
-                style={[
-                  styles.modalAddButton,
-                  account.icon_color && {backgroundColor: account.icon_color},
-                  loading && styles.buttonDisabled,
-                ]}
-                onPress={async () => {
-                  if (!withdrawMode) {
-                    showToast(
-                      'You need to select one of the options above.',
-                      'error'
-                    );
-                    runModeHighlightSequence();
-                    return;
-                  }
-                  if (withdrawMode === 'transfer') {
-                    const didTransfer = await handleTransfer(transferTarget);
-                    if (didTransfer) {
+                <TouchableOpacity
+                  style={styles.withdrawPrimaryButton}
+                  onPress={async () => {
+                    const didAdd = await handleWithdraw();
+                    if (didAdd) {
                       setWithdrawModalVisible(false);
                     }
-                    return;
-                  }
-                  const didAdd = await handleWithdraw();
-                  if (didAdd) {
-                    setWithdrawModalVisible(false);
-                  }
-                }}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.modalAddButtonText}>
-                    {withdrawMode === 'transfer' ? 'Transfer' : 'Withdraw'}
-                  </Text>
-                )}
-              </TouchableOpacity>
+                  }}
+                  disabled={loading}>
+                  {loading ? (
+                    <ActivityIndicator color="#1D4ED8" />
+                  ) : (
+                    <Text style={styles.withdrawPrimaryText}>Withdraw</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {transferSelectVisible && (
+                <View style={{marginTop: spacing.md}}>
+                  <Text style={styles.modalTitle}>Select Account to Transfer</Text>
+                  <View style={styles.pickerContainer}>
+                    <Picker
+                      selectedValue={transferTarget?.id}
+                      onValueChange={itemValue => {
+                        const selected = transferAccounts.find(
+                          acc => acc.id === itemValue
+                        );
+                        setTransferTarget(selected);
+                      }}>
+                      {transferAccounts.map(account => (
+                        <Picker.Item
+                          key={account.id}
+                          label={account.account_name}
+                          value={account.id}
+                        />
+                      ))}
+                    </Picker>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.modalAddButton, {marginTop: spacing.md}]}
+                    onPress={async () => {
+                      const didTransfer = await handleTransfer(transferTarget);
+                      if (didTransfer) {
+                        setTransferSelectVisible(false);
+                        setWithdrawModalVisible(false);
+                      }
+                    }}
+                    disabled={loading || !transferTarget}>
+                    <Text style={styles.modalAddButtonText}>Confirm Transfer</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-          </Animated.View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       <BottomSheet
@@ -3267,6 +3009,9 @@ const AccountDetailScreen = ({route, navigation}) => {
               value={newAccountName}
               onChangeText={setNewAccountName}
               editable={!loading}
+              autoFocus
+              showSoftInputOnFocus
+              ref={renameInputRef}
             />
             <TouchableOpacity
               style={[styles.modalAddButton, loading && styles.buttonDisabled]}
@@ -3660,6 +3405,86 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
+  },
+  addFullScreen: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    paddingTop: spacing.lg,
+  },
+  addHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  addHeaderButton: {
+    padding: 6,
+  },
+  addHeaderTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+  },
+  addHeaderSpacer: {
+    width: 34,
+  },
+  addContent: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    justifyContent: 'flex-end',
+  },
+  addCenterBlock: {
+    marginBottom: spacing.lg,
+  },
+  addAmountBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  addCurrencySymbol: {
+    fontSize: 28,
+    color: '#9CA3AF',
+    marginRight: 6,
+  },
+  addAmountInput: {
+    fontSize: 48,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    minWidth: 120,
+    textAlign: 'center',
+    paddingVertical: 4,
+  },
+  addNoteInput: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    textAlign: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  addScheduleSection: {
+    width: '100%',
+  },
+  addBottomBlock: {
+    paddingBottom: spacing.lg,
+  },
+  addCtaContainer: {
+    marginTop: spacing.md,
+  },
+  addCtaButton: {
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#16A34A',
+  },
+  addCtaText: {
+    fontSize: fontSize.regular - 1,
+    fontWeight: fontWeight.bold,
+    color: '#16A34A',
   },
   modalSheet: {
     backgroundColor: colors.white,
@@ -4328,7 +4153,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
-    gap: spacing.md,
+    gap: spacing.xs,
   },
   receivedButton: {
     flex: 1,
@@ -4363,6 +4188,97 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
     color: '#10B981',
+  },
+  earningPrimaryButton: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  earningPrimaryText: {
+    fontSize: fontSize.regular - 1,
+    fontWeight: fontWeight.bold,
+    color: '#EF4444',
+  },
+  earningSecondaryButton: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#16A34A',
+  },
+  earningSecondaryText: {
+    fontSize: fontSize.regular - 1,
+    fontWeight: fontWeight.bold,
+    color: '#10B981',
+  },
+  earningSecondaryTextDark: {
+    fontSize: fontSize.regular - 1,
+    fontWeight: fontWeight.bold,
+    color: '#16A34A',
+  },
+  // Styles for Withdraw/Transfer Modal
+  withdrawScrollContainer: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.sm,
+    justifyContent: 'flex-end',
+  },
+  withdrawCenterBlock: {
+    marginBottom: spacing.lg,
+  },
+  withdrawAmountBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  withdrawNoteInput: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    textAlign: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  withdrawBottomBlock: {
+    paddingBottom: spacing.lg,
+  },
+  withdrawActionButtons: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  withdrawPrimaryButton: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  withdrawPrimaryText: {
+    fontSize: fontSize.regular - 1,
+    fontWeight: fontWeight.bold,
+    color: '#EF4444',
+  },
+  withdrawSecondaryButton: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  withdrawSecondaryText: {
+    fontSize: fontSize.regular - 1,
+    fontWeight: fontWeight.bold,
+    color: '#1D4ED8',
   },
 });
 
