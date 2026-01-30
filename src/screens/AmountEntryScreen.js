@@ -24,6 +24,7 @@ import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import AmountActionButton from '../components/AmountActionButton';
 import {getAllAccounts} from '../services/accountsDatabase';
 import {createTransaction, calculateAccountBalance, getTransactionsByAccount} from '../services/transactionsDatabase';
+import {canWithdrawAtTimestampWithEntries} from '../services/transactionTimeline';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ITEM_HEIGHT = 44;
@@ -40,45 +41,6 @@ const renderAccountIcon = (iconName, size, color) => {
   return <Icon name={iconName} size={size} color={color} />;
 };
 
-const buildTimelineWithPending = (entries, pendingEntries = []) => {
-  return [...entries, ...pendingEntries]
-    .filter(entry => Number(entry?.is_deleted) !== 1)
-    .sort((a, b) => {
-      const timeDiff = Number(a.transaction_date) - Number(b.transaction_date);
-      if (timeDiff !== 0) {
-        return timeDiff;
-      }
-      const orderA = Number.isFinite(a.orderIndex) ? a.orderIndex : null;
-      const orderB = Number.isFinite(b.orderIndex) ? b.orderIndex : null;
-      if (orderA !== null && orderB !== null && orderA !== orderB) {
-        return orderA - orderB;
-      }
-      return String(a.id).localeCompare(String(b.id));
-    });
-};
-
-const canWithdrawAtTimestampWithEntries = (
-  withdrawValue,
-  timestamp,
-  entries,
-  pendingEntries = []
-) => {
-  if (!Number.isFinite(withdrawValue) || withdrawValue <= 0) {
-    return false;
-  }
-  if (!Number.isFinite(timestamp)) {
-    return false;
-  }
-  const timeline = buildTimelineWithPending(entries, pendingEntries);
-  let running = 0;
-  for (const entry of timeline) {
-    running += Number(entry.amount) || 0;
-    if (running < 0) {
-      return false;
-    }
-  }
-  return true;
-};
 
 const getAccountTypeLabel = type => {
   if (type === 'earning') {
@@ -358,6 +320,31 @@ const AmountEntryScreen = ({route, navigation}) => {
     }
 
     if (action === 'withdraw' || action === 'transfer') {
+      const accountEntries = getTransactionsByAccount(account.id);
+      const pendingEntries = [
+        {
+          id: 'pending-entry',
+          amount: -Math.abs(parsedAmount),
+          transaction_date: entryTimestamp,
+          is_deleted: 0,
+          orderIndex: 1,
+        },
+      ];
+      if (
+        !canWithdrawAtTimestampWithEntries(
+          Math.abs(parsedAmount),
+          entryTimestamp,
+          accountEntries,
+          pendingEntries
+        )
+      ) {
+        const actionLabel = action === 'transfer' ? 'Transfer' : 'Withdrawal';
+        showToast(
+          `${actionLabel} not allowed. Balance was insufficient at that time.`,
+          'error'
+        );
+        return;
+      }
       const balance = calculateAccountBalance(account.id);
       if (parsedAmount > balance) {
         showToast('Balance is low. Add amount first to withdraw.', 'error');

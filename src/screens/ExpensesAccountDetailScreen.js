@@ -43,6 +43,10 @@ import {
   updateTransactionRemark,
 } from '../services/transactionsDatabase';
 import {
+  canWithdrawAtTimestampWithEntries,
+  getBalanceAtTimestampWithEntries,
+} from '../services/transactionTimeline';
+import {
   deleteAccount,
   getAllAccounts,
   getAccountsByType,
@@ -369,66 +373,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       console.error('Failed to load transactions:', error);
     }
   }, [account.id]);
-
-  const buildTimelineWithPending = (entries, pendingEntries = []) => {
-    return [...entries, ...pendingEntries]
-      .filter(entry => Number(entry?.is_deleted) !== 1)
-      .sort((a, b) => {
-        const timeDiff =
-          Number(a.transaction_date) - Number(b.transaction_date);
-        if (timeDiff !== 0) {
-          return timeDiff;
-        }
-        const orderA = Number.isFinite(a.orderIndex) ? a.orderIndex : null;
-        const orderB = Number.isFinite(b.orderIndex) ? b.orderIndex : null;
-        if (orderA !== null && orderB !== null && orderA !== orderB) {
-          return orderA - orderB;
-        }
-        return String(a.id).localeCompare(String(b.id));
-      });
-  };
-
-  const canWithdrawAtTimestampWithEntries = (
-    withdrawValue,
-    timestamp,
-    entries,
-    pendingEntries = []
-  ) => {
-    if (!Number.isFinite(withdrawValue) || withdrawValue <= 0) {
-      return false;
-    }
-    if (!Number.isFinite(timestamp)) {
-      return false;
-    }
-    const timeline = buildTimelineWithPending(entries, pendingEntries);
-    let running = 0;
-    for (const entry of timeline) {
-      running += Number(entry.amount) || 0;
-      if (running < 0) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const getBalanceAtTimestampWithEntries = (
-    entries,
-    timestamp,
-    pendingEntries = []
-  ) => {
-    if (!Number.isFinite(timestamp)) {
-      return 0;
-    }
-    const timeline = buildTimelineWithPending(entries, pendingEntries);
-    let running = 0;
-    for (const entry of timeline) {
-      if (Number(entry.transaction_date) > timestamp) {
-        break;
-      }
-      running += Number(entry.amount) || 0;
-    }
-    return running;
-  };
 
   useEffect(() => {
     initTransactionsDatabase();

@@ -45,6 +45,7 @@ import {
   updateTransactionRemark,
   deleteTransactionsByAccount,
 } from '../services/transactionsDatabase';
+import {canWithdrawAtTimestampWithEntries} from '../services/transactionTimeline';
 import {
   initRecurringDatabase,
   createRecurringSchedule,
@@ -495,37 +496,21 @@ const AccountDetailScreen = ({route, navigation}) => {
 
   const canWithdrawAtTimestamp = useCallback(
     (withdrawValue, timestamp) => {
-      if (!Number.isFinite(withdrawValue) || withdrawValue <= 0) {
-        return false;
-      }
-      if (!Number.isFinite(timestamp)) {
-        return false;
-      }
-      const newEntry = {
-        id: 'pending',
-        amount: -Math.abs(withdrawValue),
-        transaction_date: timestamp,
-        is_deleted: 0,
-      };
-      const timeline = [...transactions, newEntry]
-        .filter(entry => Number(entry?.is_deleted) !== 1)
-        .sort((a, b) => {
-          const timeDiff =
-            Number(a.transaction_date) - Number(b.transaction_date);
-          if (timeDiff !== 0) {
-            return timeDiff;
-          }
-          return String(a.id).localeCompare(String(b.id));
-        });
-
-      let running = 0;
-      for (const entry of timeline) {
-        running += Number(entry.amount) || 0;
-        if (running < 0) {
-          return false;
-        }
-      }
-      return true;
+      const pendingEntries = [
+        {
+          id: 'pending',
+          amount: -Math.abs(withdrawValue),
+          transaction_date: timestamp,
+          is_deleted: 0,
+          orderIndex: 1,
+        },
+      ];
+      return canWithdrawAtTimestampWithEntries(
+        withdrawValue,
+        timestamp,
+        transactions,
+        pendingEntries
+      );
     },
     [transactions]
   );
