@@ -243,7 +243,8 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const scrollViewRef = useRef(null);
-  const renameInputRef = useRef(null);
+  const addAmountInputRef = useRef(null);
+  const withdrawAmountInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
@@ -698,6 +699,63 @@ const AccountDetailScreen = ({route, navigation}) => {
     ]).start(() => {
       setMenuVisible(false);
     });
+  };
+
+  const focusAddAmountInput = useCallback(() => {
+    const focus = () => addAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  const focusWithdrawAmountInput = useCallback(() => {
+    const focus = () => withdrawAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  useEffect(() => {
+    if (!addModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusAddAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [addModalVisible, focusAddAmountInput]);
+
+  useEffect(() => {
+    if (!withdrawModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusWithdrawAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [withdrawModalVisible, focusWithdrawAmountInput]);
+
+  const handleTogglePrimary = async () => {
+    try {
+      const newPrimaryStatus = !isPrimary;
+      await updateAccountPrimary(account.id, newPrimaryStatus);
+      setIsPrimary(newPrimaryStatus);
+      Alert.alert(
+        'Success',
+        newPrimaryStatus
+          ? 'This account is now set as your primary earning account'
+          : 'Primary status removed from this account'
+      );
+    } catch (error) {
+      console.error('Failed to update primary status:', error);
+      Alert.alert('Error', 'Failed to update primary status. Please try again.');
+    }
   };
 
   const isFutureEntryDate = value => {
@@ -2222,7 +2280,7 @@ const AccountDetailScreen = ({route, navigation}) => {
               </Text>
               {isDeletedTransaction(selectedTransaction) && (
                 <Text style={styles.optionsSubtitle}>
-                  Deleted entry can’t be edited.
+                  Deleted entry canï¿½t be edited.
                 </Text>
               )}
             </View>
@@ -4003,4 +4061,3 @@ const styles = StyleSheet.create({
 });
 
 export default AccountDetailScreen;
-

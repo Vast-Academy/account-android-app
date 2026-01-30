@@ -23,10 +23,7 @@ import {
   getTransactionsByContact,
   calculateContactBalance,
 } from '../services/ledgerDatabase';
-import {
-  initAccountsDatabase,
-  getPrimaryEarningAccount,
-} from '../services/accountsDatabase';
+import {initAccountsDatabase, getAccountsByType} from '../services/accountsDatabase';
 import {
   initTransactionsDatabase,
   createTransaction as createAccountTransaction,
@@ -59,13 +56,11 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const [loading, setLoading] = useState(false);
   const [getMode, setGetMode] = useState(null);
   const [getDefaultMode, setGetDefaultMode] = useState(null);
-  const [paidPromptVisible, setPaidPromptVisible] = useState(false);
-  const [primaryEarningAccount, setPrimaryEarningAccount] = useState(null);
-  const [rememberPaidChoice, setRememberPaidChoice] = useState(false);
-  const [paidDefaultChoice, setPaidDefaultChoice] = useState(null);
-  const [getPromptVisible, setGetPromptVisible] = useState(false);
-  const [rememberGetChoice, setRememberGetChoice] = useState(false);
-  const [getDefaultChoice, setGetDefaultChoice] = useState(null);
+  const [transferSelectVisible, setTransferSelectVisible] = useState(false);
+  const [transferAccounts, setTransferAccounts] = useState([]);
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [amountFieldHeight, setAmountFieldHeight] = useState(0);
+  const [amountAccountWidth, setAmountAccountWidth] = useState(0);
 
   // Animation values
   const modalSlideAnim = useRef(new Animated.Value(300)).current;
@@ -180,8 +175,8 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         setPaidDefaultChoice(null);
       }
     };
-    loadPaidDefault();
-  }, [contact?.recordID]);
+    loadTransferAccounts();
+  }, [transactionModalVisible, transactionType, getMode]);
 
   const loadData = () => {
     if (!contact?.recordID) {
@@ -241,43 +236,28 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     });
   };
 
-  const resolvePrimaryEarningAccount = () => {
-    const account = getPrimaryEarningAccount();
-    setPrimaryEarningAccount(account);
-    return account;
-  };
-
-  const storePaidDefaultChoice = async choice => {
-    if (!rememberPaidChoice || !contact?.recordID) {
+  const handleAddTransaction = async () => {
+    if (!amount || Number(amount) <= 0) {
+      showToast('Please enter a valid amount greater than 0', 'error');
       return;
     }
-    try {
-      await AsyncStorage.setItem(
-        `${LEDGER_PAID_DEFAULT_PREFIX}${contact.recordID}`,
-        choice
-      );
-      setPaidDefaultChoice(choice);
-    } catch (error) {
-      console.error('Failed to save ledger paid default choice:', error);
-    }
-  };
 
-  const storeGetDefaultChoice = async choice => {
-    if (!rememberGetChoice || !contact?.recordID) {
+    if (!contact?.recordID) {
+      showToast('Contact information not found', 'error');
       return;
     }
-    try {
-      await AsyncStorage.setItem(
-        `${LEDGER_GET_DEFAULT_PREFIX}${contact.recordID}`,
-        choice
-      );
-      setGetDefaultChoice(choice);
-    } catch (error) {
-      console.error('Failed to save ledger get default choice:', error);
-    }
-  };
 
-  const submitTransaction = async (debitPrimaryAccount, overrideGetMode = null) => {
+    if (transactionType === 'get') {
+      if (!getMode) {
+        Alert.alert('Select Option', 'Please select Withdraw or Transfer first.');
+        return;
+      }
+      if (getMode === 'transfer' && !transferTarget) {
+        Alert.alert('Select Account', 'Please select an earning account.');
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const amountValue = Number(amount);
@@ -323,6 +303,17 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
           accountRemark
         );
       }
+      if (transactionType === 'paid' && debitPrimaryAccount && primaryEarningAccount) {
+        const trimmedNote = note.trim();
+        const accountRemark = trimmedNote
+          ? `Ledger payment to ${getContactName()} - ${trimmedNote}`
+          : `Ledger payment to ${getContactName()}`;
+        await createAccountTransaction(
+          primaryEarningAccount.id,
+          -Math.abs(amountValue),
+          accountRemark
+        );
+      }
       closeTransactionModal();
       loadData();
       if (transactionType === 'get' && resolvedGetMode === 'transfer') {
@@ -341,102 +332,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handlePaidPromptYes = async () => {
-    const account = resolvePrimaryEarningAccount();
-    if (!account) {
-      Alert.alert(
-        'No Primary Account',
-        'Please set a primary earning account first.'
-      );
-      return;
-    }
-    setPaidPromptVisible(false);
-    await storePaidDefaultChoice(LEDGER_PAID_DEFAULT_DEBIT);
-    await submitTransaction(true);
-  };
-
-  const handlePaidPromptNo = async () => {
-    setPaidPromptVisible(false);
-    await storePaidDefaultChoice(LEDGER_PAID_DEFAULT_RECORD);
-    await submitTransaction(false);
-  };
-
-  const handlePaidPromptCancel = () => {
-    setPaidPromptVisible(false);
-  };
-
-  const handleGetPromptWithdraw = async () => {
-    setGetPromptVisible(false);
-    await storeGetDefaultChoice(LEDGER_GET_DEFAULT_WITHDRAW);
-    await submitTransaction(false, LEDGER_GET_DEFAULT_WITHDRAW);
-  };
-
-  const handleGetPromptTransfer = async () => {
-    const account = resolvePrimaryEarningAccount();
-    if (!account) {
-      Alert.alert(
-        'No Primary Account',
-        'Please set a primary earning account first.'
-      );
-      return;
-    }
-    setGetPromptVisible(false);
-    await storeGetDefaultChoice(LEDGER_GET_DEFAULT_TRANSFER);
-    await submitTransaction(false, LEDGER_GET_DEFAULT_TRANSFER);
-  };
-
-  const handleGetPromptCancel = () => {
-    setGetPromptVisible(false);
-  };
-
-  const handleAddTransaction = async () => {
-    if (!amount || Number(amount) <= 0) {
-      showToast('Please enter a valid amount greater than 0', 'error');
-      return;
-    }
-
-    if (!contact?.recordID) {
-      showToast('Contact information not found', 'error');
-      return;
-    }
-
-    if (transactionType === 'get') {
-      if (getDefaultChoice === LEDGER_GET_DEFAULT_WITHDRAW) {
-        await submitTransaction(false, LEDGER_GET_DEFAULT_WITHDRAW);
-        return;
-      }
-      if (getDefaultChoice === LEDGER_GET_DEFAULT_TRANSFER) {
-        await submitTransaction(false, LEDGER_GET_DEFAULT_TRANSFER);
-        return;
-      }
-      if (
-        getDefaultMode === LEDGER_GET_DEFAULT_WITHDRAW ||
-        getDefaultMode === LEDGER_GET_DEFAULT_TRANSFER
-      ) {
-        await submitTransaction(false, getDefaultMode);
-        return;
-      }
-      setGetPromptVisible(true);
-      return;
-    }
-
-    if (transactionType === 'paid') {
-      resolvePrimaryEarningAccount();
-      if (paidDefaultChoice === LEDGER_PAID_DEFAULT_DEBIT) {
-        await submitTransaction(true);
-        return;
-      }
-      if (paidDefaultChoice === LEDGER_PAID_DEFAULT_RECORD) {
-        await submitTransaction(false);
-        return;
-      }
-      setPaidPromptVisible(true);
-      return;
-    }
-
-    await submitTransaction(false);
   };
 
   const formatCurrency = amount => {
@@ -688,178 +583,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
               </TouchableOpacity>
             </View>
           </Animated.View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={getPromptVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setGetPromptVisible(false)}>
-        <View style={styles.promptOverlay}>
-          <TouchableOpacity
-            style={styles.promptBackdrop}
-            activeOpacity={1}
-            onPress={handleGetPromptCancel}
-          />
-          <View style={styles.promptCard}>
-            <TouchableOpacity
-              style={styles.promptCloseButton}
-              onPress={handleGetPromptCancel}
-              disabled={loading}
-              hitSlop={{top: 24, bottom: 24, left: 24, right: 24}}>
-              <Icon name="close" size={20} color={colors.text.primary} />
-            </TouchableOpacity>
-            <Text style={styles.promptTitle}>How should we record this?</Text>
-            <Text style={styles.promptMessage}>
-              Record{' '}
-              <Text style={styles.promptAmount}>
-                {formatCurrency(Number(amount) || 0)}
-              </Text>{' '}
-              or transfer to your primary{' '}
-              <Text
-                style={[
-                  styles.promptAccountName,
-                  primaryEarningAccount?.icon_color && {
-                    color: primaryEarningAccount.icon_color,
-                  },
-                ]}>
-                {primaryEarningAccount?.account_name || 'earning'}
-              </Text>{' '}
-              account?
-            </Text>
-            <TouchableOpacity
-              style={styles.promptRemember}
-              onPress={() =>
-                setRememberGetChoice(current => !current)
-              }
-              disabled={loading}>
-              <View
-                style={[
-                  styles.promptCheckbox,
-                  rememberGetChoice && styles.promptCheckboxChecked,
-                  rememberGetChoice &&
-                    primaryEarningAccount?.icon_color && {
-                      backgroundColor: primaryEarningAccount.icon_color,
-                      borderColor: primaryEarningAccount.icon_color,
-                    },
-                ]}>
-                {rememberGetChoice && (
-                  <Icon name="checkmark" size={14} color={colors.white} />
-                )}
-              </View>
-              <Text style={styles.promptRememberText}>
-                Remember my choice for this contact
-              </Text>
-            </TouchableOpacity>
-            <View style={styles.promptActions}>
-              <TouchableOpacity
-                style={[styles.promptButton, styles.promptButtonSecondary]}
-                onPress={handleGetPromptWithdraw}
-                disabled={loading}>
-                <Text style={styles.promptButtonTextSecondary}>Withdraw</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.promptButton,
-                  styles.promptButtonPrimary,
-                  primaryEarningAccount?.icon_color && {
-                    backgroundColor: primaryEarningAccount.icon_color,
-                  },
-                ]}
-                onPress={handleGetPromptTransfer}
-                disabled={loading}>
-                <Text style={styles.promptButtonTextPrimary}>Transfer</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={paidPromptVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPaidPromptVisible(false)}>
-        <View style={styles.promptOverlay}>
-          <TouchableOpacity
-            style={styles.promptBackdrop}
-            activeOpacity={1}
-            onPress={handlePaidPromptCancel}
-          />
-          <View style={styles.promptCard}>
-            <TouchableOpacity
-              style={styles.promptCloseButton}
-              onPress={handlePaidPromptCancel}
-              disabled={loading}
-              hitSlop={{top: 24, bottom: 24, left: 24, right: 24}}>
-              <Icon name="close" size={20} color={colors.text.primary} />
-            </TouchableOpacity>
-            <Text style={styles.promptTitle}>Get from primary account?</Text>
-            <Text style={styles.promptMessage}>
-              Do you want to get{' '}
-              <Text style={styles.promptAmount}>
-                {formatCurrency(Number(amount) || 0)}
-              </Text>{' '}
-              from{' '}
-              primary earning account{' '}
-              <Text
-                style={[
-                  styles.promptAccountName,
-                  primaryEarningAccount?.icon_color && {
-                    color: primaryEarningAccount.icon_color,
-                  },
-                ]}>
-                {primaryEarningAccount?.account_name || 'primary earning account'}
-              </Text>{' '}
-              for payment to{' '}
-              <Text style={styles.promptAccountName}>{getContactName()}</Text>?
-            </Text>
-            <TouchableOpacity
-              style={styles.promptRemember}
-              onPress={() =>
-                setRememberPaidChoice(current => !current)
-              }
-              disabled={loading}>
-              <View
-                style={[
-                  styles.promptCheckbox,
-                  rememberPaidChoice && styles.promptCheckboxChecked,
-                  rememberPaidChoice &&
-                    primaryEarningAccount?.icon_color && {
-                      backgroundColor: primaryEarningAccount.icon_color,
-                      borderColor: primaryEarningAccount.icon_color,
-                    },
-                ]}>
-                {rememberPaidChoice && (
-                  <Icon name="checkmark" size={14} color={colors.white} />
-                )}
-              </View>
-              <Text style={styles.promptRememberText}>
-                Remember my choice for this contact
-              </Text>
-            </TouchableOpacity>
-            <View style={styles.promptActions}>
-              <TouchableOpacity
-                style={[styles.promptButton, styles.promptButtonSecondary]}
-                onPress={handlePaidPromptNo}
-                disabled={loading}>
-                <Text style={styles.promptButtonTextSecondary}>Just record</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.promptButton,
-                  styles.promptButtonPrimary,
-                  primaryEarningAccount?.icon_color && {
-                    backgroundColor: primaryEarningAccount.icon_color,
-                  },
-                ]}
-                onPress={handlePaidPromptYes}
-                disabled={loading}>
-                <Text style={styles.promptButtonTextPrimary}>Get</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
         </View>
       </Modal>
     </View>
@@ -1351,99 +1074,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
-  },
-  promptOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  promptBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  promptCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: spacing.md,
-    position: 'relative',
-  },
-  promptCloseButton: {
-    position: 'absolute',
-    right: 8,
-    top: 8,
-    padding: 6,
-  },
-  promptTitle: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  promptMessage: {
-    fontSize: fontSize.medium,
-    color: colors.text.secondary,
-    marginBottom: spacing.md,
-  },
-  promptAccountName: {
-    fontWeight: fontWeight.semibold,
-  },
-  promptAmount: {
-    fontWeight: fontWeight.bold,
-    color: colors.text.primary,
-  },
-  promptRemember: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: spacing.md,
-  },
-  promptCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.white,
-  },
-  promptCheckboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  promptRememberText: {
-    fontSize: fontSize.medium,
-    color: colors.text.primary,
-    flex: 1,
-  },
-  promptActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
-  },
-  promptButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  promptButtonSecondary: {
-    backgroundColor: '#F3F4F6',
-  },
-  promptButtonPrimary: {
-    backgroundColor: colors.primary,
-  },
-  promptButtonTextSecondary: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.primary,
-  },
-  promptButtonTextPrimary: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: colors.white,
   },
 });
 
