@@ -8,6 +8,7 @@ import MainTabNavigator from './MainTabNavigator';
 import AccountDetailScreen from '../screens/AccountDetailScreen';
 import ExpensesAccountDetailScreen from '../screens/ExpensesAccountDetailScreen';
 import AmountEntryScreen from '../screens/AmountEntryScreen';
+import AddAccountScreen from '../screens/AddAccountScreen';
 import LedgerContactDetailScreen from '../screens/LedgerContactDetailScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BackupScreen from '../screens/BackupScreen';
@@ -34,6 +35,7 @@ const AppNavigator = () => {
         <Stack.Screen name="AccountDetail" component={AccountDetailScreen} />
         <Stack.Screen name="ExpensesAccountDetail" component={ExpensesAccountDetailScreen} />
         <Stack.Screen name="AmountEntry" component={AmountEntryScreen} />
+        <Stack.Screen name="AddAccount" component={AddAccountScreen} />
         <Stack.Screen name="LedgerContactDetail" component={LedgerContactDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Backup" component={BackupScreen} />

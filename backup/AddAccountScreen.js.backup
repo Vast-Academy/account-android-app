@@ -1,0 +1,644 @@
+﻿import React from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Keyboard,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  SafeAreaView,
+} from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import BsCashCoin from '../components/icons/BsCashCoin';
+import {
+  createAccount,
+  getEarningAccountsCount,
+  isAccountNameExists,
+  setPrimaryAccount,
+} from '../services/accountsDatabase';
+import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
+
+const ACCOUNT_ICONS = [
+  {id: 'wallet', name: 'wallet-outline'},
+  {id: 'cash', name: 'bs-cash-coin'},
+  {id: 'home', name: 'home-outline'},
+  {id: 'car', name: 'car-outline'},
+  {id: 'restaurant', name: 'restaurant-outline'},
+  {id: 'group', name: 'people-outline'},
+];
+
+const ACCOUNT_COLORS = [
+  {id: 'teal', value: '#14B8A6'},
+  {id: 'navy', value: '#1E40AF'},
+  {id: 'purple', value: '#8B5CF6'},
+  {id: 'brown', value: '#A16207'},
+  {id: 'cyan', value: '#06B6D4'},
+  {id: 'pink', value: '#EC4899'},
+  {id: 'gray', value: '#6B7280'},
+];
+
+const renderAccountIcon = (iconName, size, color) => {
+  if (iconName === 'bs-cash-coin') {
+    return <BsCashCoin size={size} color={color} />;
+  }
+  return <Icon name={iconName} size={size} color={color} />;
+};
+
+const AddAccountScreen = ({navigation, route}) => {
+  const [accountName, setAccountName] = React.useState('');
+  const initialType = route?.params?.initialType;
+  const [accountType, setAccountType] = React.useState('earning');
+  const [loading, setLoading] = React.useState(false);
+  const [earningCount, setEarningCount] = React.useState(0);
+  const [isFirstTime, setIsFirstTime] = React.useState(true);
+  const [isPrimary, setIsPrimary] = React.useState(false);
+  const [selectedIcon, setSelectedIcon] = React.useState(ACCOUNT_ICONS[0].name);
+  const [selectedColor, setSelectedColor] = React.useState(
+    ACCOUNT_COLORS[0].value,
+  );
+  const [keyboardPadding, setKeyboardPadding] = React.useState(0);
+  const [iconPickerVisible, setIconPickerVisible] = React.useState(false);
+  const [colorPickerVisible, setColorPickerVisible] = React.useState(false);
+  const earningRemaining = Math.max(0, 2 - earningCount);
+  const accountNameInputRef = React.useRef(null);
+  const colorCycleIndexRef = React.useRef(-1);
+  const lastRandomIconRef = React.useRef(null);
+
+  const pickRandomIcon = () => {
+    if (ACCOUNT_ICONS.length === 0) {
+      return null;
+    }
+    const index = Math.floor(Math.random() * ACCOUNT_ICONS.length);
+    const icon = ACCOUNT_ICONS[index].name;
+    if (ACCOUNT_ICONS.length > 1 && icon === lastRandomIconRef.current) {
+      const nextIndex = (index + 1) % ACCOUNT_ICONS.length;
+      return ACCOUNT_ICONS[nextIndex].name;
+    }
+    return icon;
+  };
+
+  React.useEffect(() => {
+    setAccountName('');
+    setLoading(false);
+    const nextIcon = pickRandomIcon() || ACCOUNT_ICONS[0].name;
+    setSelectedIcon(nextIcon);
+    lastRandomIconRef.current = nextIcon;
+    colorCycleIndexRef.current =
+      (colorCycleIndexRef.current + 1) % ACCOUNT_COLORS.length;
+    setSelectedColor(ACCOUNT_COLORS[colorCycleIndexRef.current].value);
+    checkEarningAccounts(initialType);
+    setIconPickerVisible(false);
+    setColorPickerVisible(false);
+
+    const focusTimer = setTimeout(() => {
+      accountNameInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(focusTimer);
+  }, []);
+
+  React.useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return undefined;
+    }
+    const showListener = Keyboard.addListener('keyboardDidShow', event => {
+      setKeyboardPadding(event.endCoordinates.height);
+    });
+    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardPadding(0);
+    });
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
+  }, []);
+
+  const checkEarningAccounts = preferredType => {
+    try {
+      const count = getEarningAccountsCount();
+      setEarningCount(count);
+      const firstTime = count === 0;
+      setIsFirstTime(firstTime);
+
+      if (preferredType === 'earning') {
+        if (!firstTime && count >= 2) {
+          setAccountType('expenses');
+          setIsPrimary(false);
+          return;
+        }
+        setAccountType('earning');
+        setIsPrimary(firstTime);
+        return;
+      }
+
+      if (preferredType === 'expenses') {
+        if (firstTime) {
+          setAccountType('earning');
+          setIsPrimary(true);
+          return;
+        }
+        setAccountType('expenses');
+        setIsPrimary(false);
+        return;
+      }
+
+      if (firstTime) {
+        setAccountType('earning');
+        setIsPrimary(true);
+      } else {
+        setAccountType('expenses');
+        setIsPrimary(false);
+      }
+    } catch (error) {
+      console.error('Failed to check earning accounts:', error);
+      setIsFirstTime(true);
+      setAccountType('earning');
+      setIsPrimary(true);
+    }
+  };
+
+  const handleAccountTypeChange = newType => {
+    if (isFirstTime && newType === 'expenses') {
+      Alert.alert(
+        'Not Available',
+        'Your first account must be an Earning Account.',
+      );
+      return;
+    }
+    if (!isFirstTime && newType === 'earning' && earningCount >= 2) {
+      Alert.alert(
+        'Limit Reached',
+        'You can only add up to 2 earning accounts.',
+      );
+      return;
+    }
+    setAccountType(newType);
+    if (newType === 'expenses') {
+      setIsPrimary(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!accountName.trim()) {
+      Alert.alert('Error', 'Account name is required.');
+      return;
+    }
+    if (isAccountNameExists(accountName)) {
+      Alert.alert('Error', 'An account with this name already exists.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await createAccount(
+        accountName,
+        accountType,
+        selectedIcon,
+        selectedColor,
+      );
+      if (accountType === 'earning' && isPrimary && result.insertId) {
+        await setPrimaryAccount(result.insertId);
+      }
+      navigation.goBack();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to create account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.screen}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+          accessibilityLabel="Go back">
+          <Icon name="arrow-back" size={24} color={colors.text.primary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Add New Account</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          {paddingBottom: spacing.lg + keyboardPadding},
+        ]}
+        keyboardShouldPersistTaps="handled">
+        <View style={styles.heroCard}>
+          <View style={[styles.heroIcon, {backgroundColor: selectedColor}]}>
+            {renderAccountIcon(selectedIcon, 26, colors.white)}
+          </View>
+          <View style={styles.heroText}>
+            <Text style={styles.heroTitle}>
+              {accountType === 'earning'
+                ? 'Create Earning Account'
+                : 'Create Expenses Account'}
+            </Text>
+            <Text style={styles.heroSubtitle}>
+              Add a name and personalize your account.
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionLabel}>Account Name</Text>
+          <TextInput
+            ref={accountNameInputRef}
+            style={styles.nameInput}
+            placeholder="Account Name (e.g., Salary, Savings)"
+            placeholderTextColor={colors.text.secondary}
+            value={accountName}
+            onChangeText={setAccountName}
+            autoCapitalize="words"
+            editable={!loading}
+          />
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionLabel}>Customize</Text>
+          <View style={styles.quickSelectRow}>
+            <TouchableOpacity
+              style={[styles.quickSelectItem, styles.quickSelectItemLeft]}
+              onPress={() => {
+                setIconPickerVisible(prev => !prev);
+                setColorPickerVisible(false);
+              }}>
+              <View
+                style={[styles.quickSelectIcon, {backgroundColor: selectedColor}]}>
+                {renderAccountIcon(selectedIcon, 20, colors.white)}
+              </View>
+              <Text style={styles.quickSelectText}>Icon</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickSelectItem}
+              onPress={() => {
+                setColorPickerVisible(prev => !prev);
+                setIconPickerVisible(false);
+              }}>
+              <View
+                style={[styles.quickSelectColor, {backgroundColor: selectedColor}]}
+              />
+              <Text style={styles.quickSelectText}>Color</Text>
+            </TouchableOpacity>
+          </View>
+
+          {iconPickerVisible && (
+            <View style={styles.inlinePicker}>
+              <View style={styles.selectionGrid}>
+                {ACCOUNT_ICONS.map(icon => (
+                  <TouchableOpacity
+                    key={icon.id}
+                    style={[
+                      styles.iconOption,
+                      selectedIcon === icon.name && styles.iconOptionSelected,
+                      selectedIcon === icon.name && {
+                        backgroundColor: selectedColor,
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedIcon(icon.name);
+                      setIconPickerVisible(false);
+                    }}>
+                    {renderAccountIcon(
+                      icon.name,
+                      20,
+                      selectedIcon === icon.name
+                        ? colors.white
+                        : colors.text.primary,
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {colorPickerVisible && (
+            <View style={styles.inlinePicker}>
+              <View style={styles.selectionGrid}>
+                {ACCOUNT_COLORS.map(color => (
+                  <TouchableOpacity
+                    key={color.id}
+                    style={[
+                      styles.colorOption,
+                      {backgroundColor: color.value},
+                      selectedColor === color.value &&
+                        styles.colorOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setSelectedColor(color.value);
+                      setColorPickerVisible(false);
+                    }}>
+                    {selectedColor === color.value && (
+                      <Icon name="checkmark" size={20} color={colors.white} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+
+        {accountType === 'earning' && (
+          <View style={styles.sectionCard}>
+            <View style={styles.primaryRow}>
+              <TouchableOpacity
+                style={[
+                  styles.primaryToggle,
+                  isPrimary
+                    ? styles.primaryToggleActive
+                    : styles.primaryToggleInactive,
+                ]}
+                onPress={() => setIsPrimary(prev => !prev)}
+                disabled={loading}>
+                <View
+                  style={[
+                    styles.primaryKnob,
+                    isPrimary && styles.primaryKnobActive,
+                  ]}
+                />
+              </TouchableOpacity>
+              <Text style={styles.primaryText}>Set as Primary Account</Text>
+            </View>
+            <Text style={styles.earningLimitNote}>
+              {`${earningRemaining} of 2 earning accounts remaining`}
+            </Text>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            {backgroundColor: selectedColor},
+            loading && styles.buttonDisabled,
+          ]}
+          onPress={handleSave}
+          disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <Text style={styles.primaryButtonText}>Add Account</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: '#F3F4F8',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerSpacer: {
+    width: 24,
+  },
+  title: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+  },
+  scrollContent: {
+    padding: spacing.md,
+  },
+  previewCardContainer: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  previewCard: {
+    width: '90%',
+    borderRadius: 16,
+    padding: spacing.md,
+    flexDirection: 'column',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 4},
+  },
+  previewCardIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  previewCardName: {
+    color: colors.white,
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+  },
+  previewCardType: {
+    color: colors.white,
+    fontSize: fontSize.small,
+  },
+  quickSelectRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  quickSelectItem: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  quickSelectItemLeft: {
+    marginRight: spacing.sm,
+  },
+  quickSelectIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  quickSelectColor: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginBottom: spacing.xs,
+  },
+  quickSelectText: {
+    fontSize: fontSize.small,
+    color: colors.text.primary,
+  },
+  form: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  inlinePicker: {
+    marginBottom: spacing.md,
+  },
+  selectionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  iconOption: {
+    width: '15%',
+    aspectRatio: 1,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  iconOptionSelected: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  colorOption: {
+    width: '15%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  colorOptionSelected: {
+    borderWidth: 2,
+    borderColor: colors.text.primary,
+  },
+  inputGroup: {
+    marginBottom: spacing.md,
+  },
+  label: {
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.medium,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  segmentedControl: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 4,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: spacing.xs,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  segmentButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  segmentButtonDisabled: {
+    opacity: 0.5,
+  },
+  segmentButtonText: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    fontWeight: fontWeight.medium,
+  },
+  segmentButtonTextActive: {
+    color: colors.white,
+    fontWeight: fontWeight.bold,
+  },
+  segmentButtonTextDisabled: {
+    color: colors.text.tertiary,
+  },
+  earningLimitNote: {
+    marginTop: spacing.xs,
+    color: colors.text.secondary,
+    fontSize: fontSize.xsmall,
+  },
+  primaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  primaryRowDisabled: {
+    opacity: 0.5,
+  },
+  primaryToggle: {
+    width: 48,
+    height: 26,
+    borderRadius: 13,
+    marginRight: spacing.sm,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  primaryToggleActive: {
+    backgroundColor: colors.primary,
+    alignItems: 'flex-end',
+  },
+  primaryToggleInactive: {
+    backgroundColor: '#E5E7EB',
+    alignItems: 'flex-start',
+  },
+  primaryToggleDisabled: {
+    backgroundColor: '#E5E7EB',
+  },
+  primaryKnob: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.white,
+  },
+  primaryKnobActive: {
+    backgroundColor: colors.white,
+  },
+  primaryText: {
+    fontSize: fontSize.small,
+    color: colors.text.primary,
+  },
+  primaryTextDisabled: {
+    color: colors.text.tertiary,
+  },
+  buttonContainer: {
+    marginBottom: spacing.xl,
+  },
+  inputWithButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  inputInline: {
+    flex: 1,
+    height: 44,
+    fontSize: fontSize.small,
+    color: colors.text.primary,
+  },
+  inlineCreateButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: 12,
+  },
+  inlineCreateText: {
+    color: colors.white,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.bold,
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+});
+
+export default AddAccountScreen;

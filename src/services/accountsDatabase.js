@@ -29,6 +29,12 @@ const ACCOUNT_TYPE_CHECK_SQL = "('earning', 'expenses', 'saving')";
 const DEFAULT_SAVING_ACCOUNT_NAME = 'Saving Account';
 const DEFAULT_SAVING_ACCOUNT_ICON = 'wallet-outline';
 const DEFAULT_SAVING_ACCOUNT_COLOR = TEAL_500;
+const DEFAULT_EARNING_ACCOUNT_NAME = 'Income Account';
+const DEFAULT_EARNING_ACCOUNT_ICON = 'bs-cash-coin';
+const DEFAULT_EARNING_ACCOUNT_COLOR = NAVY_500;
+const DEFAULT_EXPENSES_ACCOUNT_NAME = 'Expenses Account';
+const DEFAULT_EXPENSES_ACCOUNT_ICON = 'bag-outline';
+const DEFAULT_EXPENSES_ACCOUNT_COLOR = BROWN_500;
 
 const COLOR_MIGRATION_MAP = {
   [LEGACY_RED_400]: BROWN_500,
@@ -131,6 +137,70 @@ const getProtectedAccountDeleteMessage = account => {
   return 'This account cannot be deleted.';
 };
 
+
+const getNextSortIndex = db => {
+  const minResult = db.execute(
+    'SELECT MIN(sort_index) as minIndex FROM accounts'
+  );
+  const minIndex = minResult.rows?._array?.[0]?.minIndex;
+  return Number.isFinite(minIndex) ? minIndex - 1 : 0;
+};
+
+const insertDefaultAccount = (db, {name, type, icon, color, isPrimary = 0}) => {
+  const timestamp = Date.now();
+  const sortIndex = getNextSortIndex(db);
+  db.execute(
+    `INSERT INTO accounts (account_name, account_type, icon, icon_color, balance, is_primary, sort_index, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+    [name, type, icon, color, isPrimary, sortIndex, timestamp, timestamp]
+  );
+};
+
+
+const ensureDefaultEarningAccount = db => {
+  try {
+    const earningCountResult = db.execute(
+      "SELECT COUNT(*) as count FROM accounts WHERE account_type = 'earning'"
+    );
+    const earningCount = earningCountResult.rows?._array?.[0]?.count ?? 0;
+    if (earningCount > 0) {
+      return;
+    }
+    insertDefaultAccount(db, {
+      name: DEFAULT_EARNING_ACCOUNT_NAME,
+      type: 'earning',
+      icon: DEFAULT_EARNING_ACCOUNT_ICON,
+      color: DEFAULT_EARNING_ACCOUNT_COLOR,
+      isPrimary: 1,
+    });
+    console.log('Default earning account created.');
+  } catch (error) {
+    console.warn('Failed to ensure default earning account:', error);
+  }
+};
+
+const ensureDefaultExpensesAccount = db => {
+  try {
+    const expensesCountResult = db.execute(
+      "SELECT COUNT(*) as count FROM accounts WHERE account_type = 'expenses'"
+    );
+    const expensesCount = expensesCountResult.rows?._array?.[0]?.count ?? 0;
+    if (expensesCount > 0) {
+      return;
+    }
+    insertDefaultAccount(db, {
+      name: DEFAULT_EXPENSES_ACCOUNT_NAME,
+      type: 'expenses',
+      icon: DEFAULT_EXPENSES_ACCOUNT_ICON,
+      color: DEFAULT_EXPENSES_ACCOUNT_COLOR,
+      isPrimary: 0,
+    });
+    console.log('Default expenses account created.');
+  } catch (error) {
+    console.warn('Failed to ensure default expenses account:', error);
+  }
+};
+
 const ensureDefaultSavingAccount = db => {
   try {
     const savingCountResult = db.execute(
@@ -140,26 +210,13 @@ const ensureDefaultSavingAccount = db => {
     if (savingCount > 0) {
       return;
     }
-
-    const timestamp = Date.now();
-    const minResult = db.execute(
-      'SELECT MIN(sort_index) as minIndex FROM accounts'
-    );
-    const minIndex = minResult.rows?._array?.[0]?.minIndex;
-    const sortIndex = Number.isFinite(minIndex) ? minIndex - 1 : 0;
-
-    db.execute(
-      `INSERT INTO accounts (account_name, account_type, icon, icon_color, balance, is_primary, sort_index, created_at, updated_at)
-       VALUES (?, 'saving', ?, ?, 0, 0, ?, ?, ?)`,
-      [
-        DEFAULT_SAVING_ACCOUNT_NAME,
-        DEFAULT_SAVING_ACCOUNT_ICON,
-        DEFAULT_SAVING_ACCOUNT_COLOR,
-        sortIndex,
-        timestamp,
-        timestamp,
-      ]
-    );
+    insertDefaultAccount(db, {
+      name: DEFAULT_SAVING_ACCOUNT_NAME,
+      type: 'saving',
+      icon: DEFAULT_SAVING_ACCOUNT_ICON,
+      color: DEFAULT_SAVING_ACCOUNT_COLOR,
+      isPrimary: 0,
+    });
     console.log('Default saving account created.');
   } catch (error) {
     console.warn('Failed to ensure default saving account:', error);
@@ -262,6 +319,8 @@ export const initAccountsDatabase = () => {
       console.warn('Failed to backfill sort_index:', e);
     }
 
+    ensureDefaultEarningAccount(db);
+    ensureDefaultExpensesAccount(db);
     ensureDefaultSavingAccount(db);
 
     console.log('Accounts database initialized successfully');

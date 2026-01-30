@@ -17,7 +17,6 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import FaArrowCircleDown from '../components/icons/FaArrowCircleDown';
 import BsCashCoin from '../components/icons/BsCashCoin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
-import AddAccountModal from '../components/AddAccountModal';
 import FaArrowCircleUp from '../components/icons/FaArrowCircleUp';
 import BottomSheet from '../components/BottomSheet';
 import {
@@ -96,9 +95,9 @@ const DashboardScreen = ({navigation}) => {
   const [filteredEarning, setFilteredEarning] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [hasRecords, setHasRecords] = useState(true);
+  const [fabExpanded, setFabExpanded] = useState(false);
 
   // Other states
-  const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
@@ -117,6 +116,7 @@ const DashboardScreen = ({navigation}) => {
     useState(false);
 
   const fabRef = useRef(null);
+  const fabAnim = useRef(new Animated.Value(0)).current;
 
   const netBalance = React.useMemo(() => {
     return accounts.reduce((total, account) => {
@@ -126,7 +126,23 @@ const DashboardScreen = ({navigation}) => {
   }, [accounts]);
 
   const handleAddAccountPress = () => {
-    setShowAddAccountModal(true);
+    const next = !fabExpanded;
+    setFabExpanded(next);
+    Animated.timing(fabAnim, {
+      toValue: next ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const openAddAccount = type => {
+    setFabExpanded(false);
+    Animated.timing(fabAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+    navigation.navigate('AddAccount', {initialType: type});
   };
 
   const selectedAccountIndex = React.useMemo(() => {
@@ -1063,7 +1079,7 @@ const DashboardScreen = ({navigation}) => {
                               styles.badge,
                               {backgroundColor: colors.text.light},
                             ]}>
-                            <Icon name="star" size={12} color={colors.white} />
+                            <Icon name="star" size={12} color={fabExpanded ? colors.error : colors.white} />
                           </View>
                         )}
                       </View>
@@ -1283,24 +1299,47 @@ const DashboardScreen = ({navigation}) => {
         </View>
       </ScrollView>
 
-      <TouchableOpacity
-        ref={fabRef}
-        style={styles.fab}
-        onPress={handleAddAccountPress}>
-        <Icon name="person-add" size={22} color={colors.white} />
-      </TouchableOpacity>
+      
 
-      {/* Add Account Modal */}
-      <AddAccountModal
-        visible={showAddAccountModal}
-        onClose={() => setShowAddAccountModal(false)}
-        onSuccess={() => {
-          // Refresh accounts list
-          console.log('Account added successfully - refreshing list');
-          loadAccounts();
-          showToast('Account created successfully', 'success', 3000);
-        }}
-      />
+      <Animated.View
+        pointerEvents={fabExpanded ? 'auto' : 'none'}
+        style={[
+          styles.fabActions,
+          {
+            opacity: fabAnim,
+            transform: [
+              {
+                translateY: fabAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [16, 0],
+                }),
+              },
+            ],
+          },
+        ]}>
+        <TouchableOpacity
+          style={styles.fabActionRow}
+          onPress={() => openAddAccount('earning')}>
+          <Text style={styles.fabActionLabel}>Add Earning Account</Text>
+          <View style={[styles.fabActionButton, styles.fabActionButtonEarning]}>
+            <Icon name="person-add" size={20} color={colors.white} />
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.fabActionRow}
+          onPress={() => openAddAccount('expenses')}>
+          <Text style={styles.fabActionLabel}>Add Expenses Account</Text>
+          <View style={[styles.fabActionButton, styles.fabActionButtonExpenses]}>
+            <Icon name="person-add" size={20} color={colors.white} />
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+<TouchableOpacity
+        ref={fabRef}
+        style={[styles.fab, fabExpanded && styles.fabOpen]}
+        onPress={handleAddAccountPress}>
+        <Icon name={fabExpanded ? 'close' : 'person-add'} size={22} color={colors.white} />
+      </TouchableOpacity>
 
       {/* Bottom Sheet for Period/Month/Year */}
       <BottomSheet
@@ -1645,6 +1684,52 @@ const styles = StyleSheet.create({
   accountMetricNegative: {
     color: colors.error,
   },
+
+  fabActions: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg + 64,
+    alignItems: 'flex-end',
+  },
+  fabActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  fabActionLabel: {
+    marginRight: spacing.sm,
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+  },
+  fabActionButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  fabActionButtonEarning: {
+    backgroundColor: '#22C55E',
+  },
+  fabActionButtonExpenses: {
+    backgroundColor: colors.primary,
+  },
   fab: {
     position: 'absolute',
     right: spacing.lg,
@@ -1660,6 +1745,9 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 3},
     shadowOpacity: 0.2,
     shadowRadius: 4,
+  },
+  fabOpen: {
+    backgroundColor: colors.error,
   },
   // Accounts Section
   accountsSection: {
