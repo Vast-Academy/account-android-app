@@ -14,6 +14,7 @@ import {
   Animated,
   Easing,
   Keyboard,
+  BackHandler,
   InteractionManager,
   PermissionsAndroid,
   Platform,
@@ -27,6 +28,8 @@ import RNBlobUtil from 'react-native-blob-util';
 import ImageViewer from 'react-native-image-zoom-viewer';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import BottomSheet from '../components/BottomSheet';
+import AmountEntryView from '../components/AmountEntryView';
+import AmountActionButton from '../components/AmountActionButton';
 import {useUniversalToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import {
@@ -41,6 +44,7 @@ import {
 } from '../services/transactionsDatabase';
 import {
   deleteAccount,
+  getAllAccounts,
   getAccountsByType,
   getPrimaryEarningAccount,
   renameAccount,
@@ -187,6 +191,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     account_name: '',
     is_primary: 0,
   };
+  const isSavingAccount = account?.account_type === 'saving';
 
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawNote, setWithdrawNote] = useState('');
@@ -212,6 +217,14 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const [requestTarget, setRequestTarget] = useState(null);
   const [requestFieldHeight, setRequestFieldHeight] = useState(0);
   const [requestAccountWidth, setRequestAccountWidth] = useState(0);
+  const [transferModalVisible, setTransferModalVisible] = useState(false);
+  const [transferSelectVisible, setTransferSelectVisible] = useState(false);
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+  const [transferAccounts, setTransferAccounts] = useState([]);
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [transferFieldHeight, setTransferFieldHeight] = useState(0);
+  const [transferAccountWidth, setTransferAccountWidth] = useState(0);
   const [menuVisible, setMenuVisible] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
@@ -238,12 +251,107 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const scrollViewRef = useRef(null);
   const requestAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
+  const transferAmountInputRef = useRef(null);
   const renameInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
   const menuOverlayOpacity = useRef(new Animated.Value(0)).current;
   const menuContentTranslateY = useRef(new Animated.Value(300)).current;
+
+  const isOverlayOpen =
+    withdrawModalVisible ||
+    transferModalVisible ||
+    requestModalVisible ||
+    editAmountVisible ||
+    editRemarkVisible ||
+    renameModalVisible ||
+    optionsVisible ||
+    menuVisible ||
+    lowBalancePromptVisible ||
+    isBottomSheetVisible ||
+    addReceiptSheetVisible ||
+    receiptPreviewVisible;
+
+  useEffect(() => {
+    navigation.setOptions({gestureEnabled: !isOverlayOpen});
+    return () => navigation.setOptions({gestureEnabled: true});
+  }, [navigation, isOverlayOpen]);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      if (withdrawModalVisible) {
+        setWithdrawModalVisible(false);
+        setWithdrawNote('');
+        setWithdrawReceiptUri('');
+        return true;
+      }
+      if (transferModalVisible) {
+        setTransferModalVisible(false);
+        setTransferNote('');
+        setTransferSelectVisible(false);
+        return true;
+      }
+      if (requestModalVisible) {
+        setRequestModalVisible(false);
+        setRequestNote('');
+        return true;
+      }
+      if (lowBalancePromptVisible) {
+        setLowBalancePromptVisible(false);
+        return true;
+      }
+      if (optionsVisible) {
+        closeOptionsMenu(true);
+        return true;
+      }
+      if (menuVisible) {
+        closeAccountMenu();
+        return true;
+      }
+      if (editAmountVisible) {
+        setEditAmountVisible(false);
+        return true;
+      }
+      if (editRemarkVisible) {
+        setEditRemarkVisible(false);
+        return true;
+      }
+      if (renameModalVisible) {
+        closeRenameModal();
+        return true;
+      }
+      if (addReceiptSheetVisible) {
+        setAddReceiptSheetVisible(false);
+        return true;
+      }
+      if (isBottomSheetVisible) {
+        setBottomSheetVisible(false);
+        return true;
+      }
+      if (receiptPreviewVisible) {
+        closeReceiptPreview();
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [
+    withdrawModalVisible,
+    transferModalVisible,
+    requestModalVisible,
+    lowBalancePromptVisible,
+    optionsVisible,
+    menuVisible,
+    editAmountVisible,
+    editRemarkVisible,
+    renameModalVisible,
+    addReceiptSheetVisible,
+    isBottomSheetVisible,
+    receiptPreviewVisible,
+  ]);
 
   const loadTransactions = useCallback(() => {
     if (!account.id) {
@@ -331,9 +439,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       loadMonthStartDay();
+      loadTransactions();
     });
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, loadMonthStartDay, loadTransactions]);
 
   useEffect(() => {
     if (!scrollViewRef.current) {
@@ -394,6 +503,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     if (
       withdrawModalVisible ||
       requestModalVisible ||
+      transferModalVisible ||
       renameModalVisible ||
       editAmountVisible ||
       editRemarkVisible
@@ -410,6 +520,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   }, [
     withdrawModalVisible,
     requestModalVisible,
+    transferModalVisible,
     renameModalVisible,
     editAmountVisible,
     editRemarkVisible,
@@ -441,12 +552,43 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   }, [requestModalVisible]);
 
   useEffect(() => {
-    if (withdrawModalVisible || requestModalVisible) {
+    if (withdrawModalVisible || requestModalVisible || transferModalVisible) {
       setEntryDate(new Date());
       setShowEntryDatePicker(false);
       setShowEntryTimePicker(false);
     }
-  }, [withdrawModalVisible, requestModalVisible]);
+  }, [withdrawModalVisible, requestModalVisible, transferModalVisible]);
+
+  useEffect(() => {
+    if (!transferModalVisible) {
+      setTransferSelectVisible(false);
+      setTransferAmount('');
+      setTransferNote('');
+      return;
+    }
+    try {
+      const accountsList = getAllAccounts().filter(item => {
+        if (!item || item.id === account.id) {
+          return false;
+        }
+        return item.account_type !== 'saving';
+      });
+      setTransferAccounts(accountsList);
+      if (accountsList.length === 0) {
+        setTransferTarget(null);
+        return;
+      }
+      setTransferTarget(current =>
+        current && accountsList.some(item => item.id === current.id)
+          ? current
+          : accountsList[0]
+      );
+    } catch (error) {
+      console.error('Failed to load transfer accounts:', error);
+      setTransferAccounts([]);
+      setTransferTarget(null);
+    }
+  }, [transferModalVisible, account.id]);
 
   const focusWithdrawAmountInput = useCallback(() => {
     const focus = () => withdrawAmountInputRef.current?.focus();
@@ -460,6 +602,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
   const focusRequestAmountInput = useCallback(() => {
     const focus = () => requestAmountInputRef.current?.focus();
+    Keyboard.dismiss();
+    focus();
+    requestAnimationFrame(focus);
+    InteractionManager.runAfterInteractions(focus);
+    setTimeout(focus, 300);
+    setTimeout(focus, 600);
+  }, []);
+
+  const focusTransferAmountInput = useCallback(() => {
+    const focus = () => transferAmountInputRef.current?.focus();
     Keyboard.dismiss();
     focus();
     requestAnimationFrame(focus);
@@ -497,6 +649,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }, 250);
     return () => clearTimeout(timer);
   }, [requestModalVisible, focusRequestAmountInput]);
+
+  useEffect(() => {
+    if (!transferModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusTransferAmountInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [transferModalVisible, focusTransferAmountInput]);
 
   useEffect(() => {
     if (!renameModalVisible) {
@@ -1318,6 +1480,13 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   };
 
   const handleWithdraw = async () => {
+    if (isSavingAccount) {
+      showUniversalToast(
+        'Saving account does not support withdrawals.',
+        'error'
+      );
+      return false;
+    }
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
       showUniversalToast('Please enter a valid amount.', 'error');
       return false;
@@ -1420,6 +1589,94 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     } catch (error) {
       console.error('Failed to add withdrawal:', error);
       Alert.alert('Error', 'Failed to add entry. Please try again.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTransferFromSaving = async () => {
+    if (!isSavingAccount) {
+      return false;
+    }
+    if (!transferTarget) {
+      Alert.alert('Select Account', 'Please select a transfer account.');
+      return false;
+    }
+    if (transferTarget.account_type === 'saving') {
+      showUniversalToast('Cannot transfer to a saving account.', 'error');
+      return false;
+    }
+    if (!transferAmount || parseFloat(transferAmount) <= 0) {
+      showUniversalToast('Please enter a valid amount.', 'error');
+      return false;
+    }
+    if (isFutureEntryDate(entryDate)) {
+      showUniversalToast('Future entry not allowed.', 'error');
+      return false;
+    }
+
+    const amountValue = Math.abs(parseFloat(transferAmount));
+    const entryTimestamp = entryDate.getTime();
+    const balanceAtTimestamp = getBalanceAtTimestampWithEntries(
+      transactions,
+      entryTimestamp
+    );
+    if (amountValue > balanceAtTimestamp) {
+      showUniversalToast('Balance is low in saving account.', 'error');
+      return false;
+    }
+    const savingPending = [
+      {
+        id: 'pending-saving-transfer',
+        amount: -amountValue,
+        transaction_date: entryTimestamp,
+        is_deleted: 0,
+        orderIndex: 1,
+      },
+    ];
+    if (
+      !canWithdrawAtTimestampWithEntries(
+        amountValue,
+        entryTimestamp,
+        transactions,
+        savingPending
+      )
+    ) {
+      showUniversalToast(
+        'Transfer not allowed. Balance was insufficient at that time.',
+        'error'
+      );
+      return false;
+    }
+
+    const trimmedNote = transferNote.trim();
+    const toRemark = trimmedNote
+      ? `Transferred to ${transferTarget.account_name} - ${trimmedNote}`
+      : `Transferred to ${transferTarget.account_name}`;
+    const fromRemark = trimmedNote
+      ? `Transferred from ${account.account_name} - ${trimmedNote}`
+      : `Transferred from ${account.account_name}`;
+
+    setLoading(true);
+    try {
+      await createTransaction(account.id, -amountValue, toRemark, entryTimestamp);
+      await createTransaction(
+        transferTarget.id,
+        amountValue,
+        fromRemark,
+        entryTimestamp
+      );
+      setTransferAmount('');
+      setTransferNote('');
+      setTransferSelectVisible(false);
+      setTransferModalVisible(false);
+      loadTransactions();
+      showUniversalToast('Transfer completed successfully.', 'success');
+      return true;
+    } catch (error) {
+      console.error('Failed to transfer from saving:', error);
+      Alert.alert('Error', 'Failed to transfer. Please try again.');
       return false;
     } finally {
       setLoading(false);
@@ -2312,30 +2569,54 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         ]}>
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity
-            style={styles.receivedButton}
-            onPress={() => setWithdrawModalVisible(true)}>
-            <Icon name="arrow-down" size={20} color="#EF4444" />
-            <Text style={styles.receivedButtonText}>Withdraw</Text>
-          </TouchableOpacity>
+          {!isSavingAccount && (
+            <TouchableOpacity
+              style={styles.receivedButton}
+              onPress={() => {
+                navigation.navigate('AmountEntry', {
+                  mode: 'withdraw',
+                  account,
+                  prevRouteKey: route.key,
+                  initialEntryDate: entryDate.toISOString(),
+                });
+              }}>
+              <Icon name="arrow-down" size={20} color="#EF4444" />
+              <Text style={styles.receivedButtonText}>Withdraw</Text>
+            </TouchableOpacity>
+          )}
+          {isSavingAccount && (
+            <TouchableOpacity
+              style={styles.transferButton}
+              onPress={() => {
+                navigation.navigate('AmountEntry', {
+                  mode: 'withdraw',
+                  account,
+                  prevRouteKey: route.key,
+                  initialEntryDate: entryDate.toISOString(),
+                  transferOnly: true,
+                });
+              }}>
+              <Icon name="swap-horizontal" size={20} color="#2563EB" />
+              <Text style={styles.transferButtonText}>Transfer</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.givenButton}
-            onPress={() => setRequestModalVisible(true)}>
+            onPress={() => {
+              navigation.navigate('AmountEntry', {
+                mode: 'request',
+                account,
+                prevRouteKey: route.key,
+                initialEntryDate: entryDate.toISOString(),
+              });
+            }}>
             <Icon name="arrow-up" size={20} color="#10B981" />
             <Text style={styles.givenButtonText}>Request Amount</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      <Modal
-        visible={withdrawModalVisible}
-        transparent
-        animationType="none"
-        onRequestClose={() => {
-          setWithdrawModalVisible(false);
-          setWithdrawNote('');
-          setWithdrawReceiptUri('');
-        }}>
+      <AmountEntryView visible={withdrawModalVisible}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.modalBackdrop}
@@ -2437,33 +2718,220 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 </View>
               ) : null}
 
-              <TouchableOpacity
+              <AmountActionButton
+                label="Withdraw"
+                variant="neutralOutline"
                 style={[styles.modalAddButton, loading && styles.buttonDisabled]}
+                textStyle={styles.modalAddButtonText}
                 onPress={async () => {
                   const didWithdraw = await handleWithdraw();
                   if (didWithdraw) {
                     setWithdrawModalVisible(false);
                   }
                 }}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.modalAddButtonText}>Withdraw</Text>
-                )}
-              </TouchableOpacity>
+                loading={loading}
+                activityColor={colors.white}
+              />
           </Animated.View>
         </View>
-      </Modal>
+      </AmountEntryView>
 
-      <Modal
-        visible={requestModalVisible}
-        transparent
-        animationType="none"
-        onRequestClose={() => {
-          setRequestModalVisible(false);
-          setRequestNote('');
-        }}>
+      <AmountEntryView visible={transferModalVisible}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setTransferModalVisible(false);
+              setTransferNote('');
+              setTransferSelectVisible(false);
+            }}
+          />
+          <Animated.View
+            style={[
+              styles.modalSheet,
+              {
+                transform: [
+                  {
+                    translateY: modalSlideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [260, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            {transferSelectVisible && (
+              <Pressable
+                style={styles.transferDismissOverlay}
+                onPress={() => setTransferSelectVisible(false)}
+              />
+            )}
+            <View style={styles.modalContent}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Transfer</Text>
+              <View style={styles.amountFieldWrapper}>
+                <View
+                  style={styles.amountFieldRow}
+                  onLayout={event =>
+                    setTransferFieldHeight(event.nativeEvent.layout.height)
+                  }>
+                  <TextInput
+                    style={styles.amountInputBare}
+                    value={transferAmount}
+                    onChangeText={setTransferAmount}
+                    keyboardType="numeric"
+                    ref={transferAmountInputRef}
+                    showSoftInputOnFocus
+                    editable={!loading}
+                  />
+                  <View style={styles.amountFieldDivider} />
+                  <TouchableOpacity
+                    style={styles.amountAccountButton}
+                    onPress={() =>
+                      setTransferSelectVisible(current => !current)
+                    }
+                    onLayout={event =>
+                      setTransferAccountWidth(event.nativeEvent.layout.width)
+                    }
+                    disabled={transferAccounts.length === 0}>
+                    <Text
+                      style={[
+                        styles.amountAccountText,
+                        transferTarget?.icon_color && {
+                          color: transferTarget.icon_color,
+                        },
+                      ]}
+                      numberOfLines={1}>
+                      {transferTarget?.account_name ||
+                        (transferAccounts.length
+                          ? 'Select account'
+                          : 'No accounts')}
+                    </Text>
+                    <Icon
+                      name="chevron-down"
+                      size={16}
+                      color={colors.text.secondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+                {transferSelectVisible && (
+                  <View
+                    style={[
+                      styles.floatingAccountList,
+                      {
+                        bottom: transferFieldHeight + 6,
+                        right: 0,
+                        width: transferAccountWidth || 140,
+                      },
+                    ]}>
+                    <ScrollView
+                      style={styles.floatingAccountScroll}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled">
+                      {transferAccounts.map(item => {
+                        const isSelected = transferTarget?.id === item.id;
+                        const itemColor =
+                          item.icon_color || colors.text.primary;
+                        return (
+                          <TouchableOpacity
+                            key={item.id}
+                            style={[
+                              styles.floatingAccountItem,
+                              isSelected && styles.floatingAccountItemSelected,
+                            ]}
+                            onPress={() => {
+                              setTransferTarget(item);
+                              setTransferSelectVisible(false);
+                            }}>
+                            <Text
+                              style={[
+                                styles.floatingAccountText,
+                                {color: itemColor},
+                                isSelected && styles.floatingAccountTextSelected,
+                              ]}>
+                              {item.account_name}
+                            </Text>
+                            {isSelected && (
+                              <Icon
+                                name="checkmark-circle"
+                                size={16}
+                                color={itemColor}
+                              />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+              <View style={styles.entryDateTimeRow}>
+                <TouchableOpacity
+                  style={styles.entryDateTimeButton}
+                  onPress={() => setShowEntryDatePicker(true)}>
+                  <Text style={styles.entryDateTimeLabel}>Date</Text>
+                  <Text style={styles.entryDateTimeValue}>
+                    {formatEntryDate(entryDate)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.entryDateTimeButton}
+                  onPress={() => setShowEntryTimePicker(true)}>
+                  <Text style={styles.entryDateTimeLabel}>Time</Text>
+                  <Text style={styles.entryDateTimeValue}>
+                    {formatEntryTime(entryDate)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {showEntryDatePicker && (
+                <DateTimePicker
+                  value={entryDate}
+                  mode="date"
+                  display="default"
+                  maximumDate={new Date()}
+                  onChange={handleEntryDateChange}
+                />
+              )}
+              {showEntryTimePicker && (
+                <DateTimePicker
+                  value={entryDate}
+                  mode="time"
+                  display="default"
+                  maximumDate={new Date()}
+                  onChange={handleEntryTimeChange}
+                />
+              )}
+              <Text style={styles.modalNoteLabel}>Note (Optional)</Text>
+              <TextInput
+                style={styles.modalNoteInput}
+                value={transferNote}
+                onChangeText={setTransferNote}
+                placeholder="Add a note"
+                placeholderTextColor={colors.text.light}
+                multiline
+                numberOfLines={3}
+                editable={!loading}
+              />
+              <AmountActionButton
+                label="Transfer"
+                variant="neutralOutline"
+                style={[
+                  styles.modalAddButton,
+                  account.icon_color && {backgroundColor: account.icon_color},
+                  loading && styles.buttonDisabled,
+                ]}
+                textStyle={styles.modalAddButtonText}
+                onPress={handleTransferFromSaving}
+                loading={loading}
+                activityColor={colors.white}
+              />
+            </View>
+          </Animated.View>
+        </View>
+      </AmountEntryView>
+
+      <AmountEntryView visible={requestModalVisible}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.modalBackdrop}
@@ -2640,29 +3108,28 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
                 numberOfLines={3}
                 editable={!loading}
               />
-              <TouchableOpacity
+              <AmountActionButton
+                label="Request"
+                variant="neutralOutline"
                 style={[
                   styles.modalAddButton,
                   account.icon_color && {backgroundColor: account.icon_color},
                   loading && styles.buttonDisabled,
                 ]}
+                textStyle={styles.modalAddButtonText}
                 onPress={async () => {
                   const didOpen = await handleRequestStart();
                   if (didOpen) {
                     setRequestModalVisible(false);
                   }
                 }}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.modalAddButtonText}>Request</Text>
-                )}
-              </TouchableOpacity>
+                loading={loading}
+                activityColor={colors.white}
+              />
             </View>
           </Animated.View>
         </View>
-      </Modal>
+      </AmountEntryView>
 
       <Modal
         visible={receiptPreviewVisible}
@@ -2979,6 +3446,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
               style={[styles.optionButton, styles.optionDelete]}
               onPress={() => {
                 closeAccountMenu();
+                if (isSavingAccount) {
+                  Alert.alert('Not Allowed', 'Saving account cannot be deleted.');
+                  return;
+                }
                 if (Math.abs(Number(totalBalance) || 0) > 0.000001) {
                   Alert.alert(
                     'Balance Not Settled',
@@ -3333,7 +3804,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 8,
+    borderRadius: 999,
     padding: 6,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3519,7 +3990,7 @@ const styles = StyleSheet.create({
   },
   receiptSheetCancel: {
     backgroundColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 999,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
@@ -3726,7 +4197,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.white,
     paddingVertical: spacing.md,
-    borderRadius: 8,
+    borderRadius: 999,
     gap: 6,
     borderWidth: 1,
     borderColor: '#EF4444',
@@ -3736,6 +4207,23 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: '#EF4444',
   },
+  transferButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    paddingVertical: spacing.md,
+    borderRadius: 999,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+  },
+  transferButtonText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+    color: '#2563EB',
+  },
   givenButton: {
     flex: 1,
     flexDirection: 'row',
@@ -3743,7 +4231,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.white,
     paddingVertical: spacing.md,
-    borderRadius: 8,
+    borderRadius: 999,
     gap: 6,
     borderWidth: 1,
     borderColor: '#10B981',
@@ -3897,7 +4385,7 @@ const styles = StyleSheet.create({
   receiptActionButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
@@ -4135,7 +4623,7 @@ const styles = StyleSheet.create({
   promptButton: {
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 999,
   },
   promptButtonSecondary: {
     backgroundColor: '#F3F4F6',

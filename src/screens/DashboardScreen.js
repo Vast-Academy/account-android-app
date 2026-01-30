@@ -12,8 +12,6 @@ import {
   UIManager,
   Animated,
   TextInput,
-  Dimensions,
-  InteractionManager,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import FaArrowCircleDown from '../components/icons/FaArrowCircleDown';
@@ -74,14 +72,6 @@ const DEFAULT_MONTH_START_DAY = 1;
 const METRIC_ICON_SIZE = 24;
 const METRIC_LABEL_GAP = 8;
 const METRIC_LABEL_OFFSET = METRIC_ICON_SIZE + METRIC_LABEL_GAP;
-const TUTORIAL_FAB_SIZE = 72;
-const TUTORIAL_RING_SIZE = 92;
-const TAB_BAR_HEIGHT = 76;
-const HANDWRITING_FONT = Platform.select({
-  ios: 'Snell Roundhand',
-  android: 'cursive',
-  default: 'cursive',
-});
 
 const renderAccountIcon = (iconName, size, color) => {
   if (iconName === 'bs-cash-coin') {
@@ -90,14 +80,7 @@ const renderAccountIcon = (iconName, size, color) => {
   return <Icon name={iconName} size={size} color={color} />;
 };
 
-const DashboardScreen = ({route, navigation}) => {
-  const {user} = route.params || {};
-  const userNameRaw =
-    user?.displayName ||
-    user?.name ||
-    (user?.email ? user.email.split('@')[0] : '') ||
-    'there';
-  const userName = String(userNameRaw).trim().split(/\s+/)[0] || 'there';
+const DashboardScreen = ({navigation}) => {
 
   // Period selection states
   const [quickPeriod, setQuickPeriod] = useState('1month');
@@ -117,15 +100,14 @@ const DashboardScreen = ({route, navigation}) => {
   // Other states
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [accounts, setAccounts] = useState([]);
-  const [isAccountsLoaded, setIsAccountsLoaded] = useState(false);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const selectedAccountRef = useRef(null);
   const deletePressGuardRef = useRef(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [renameTargetAccount, setRenameTargetAccount] = useState(null);
   const [newAccountName, setNewAccountName] = useState('');
-  const [fabLayout, setFabLayout] = useState(null);
   const {showToast} = useToast();
   const currencySymbol = useCurrencySymbol();
 
@@ -143,76 +125,9 @@ const DashboardScreen = ({route, navigation}) => {
     }, 0);
   }, [accounts]);
 
-  const showTutorialStep1 =
-    isAccountsLoaded && accounts.length === 0 && !showAddAccountModal;
-
   const handleAddAccountPress = () => {
     setShowAddAccountModal(true);
   };
-
-  const updateFabLayout = React.useCallback(() => {
-    if (!fabRef.current) {
-      return;
-    }
-    fabRef.current.measureInWindow((x, y, width, height) => {
-      if (Number.isFinite(x) && Number.isFinite(y) && width > 0 && height > 0) {
-        setFabLayout({x, y, width, height});
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!showTutorialStep1) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        updateFabLayout();
-        setTimeout(updateFabLayout, 100);
-      });
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [showTutorialStep1, updateFabLayout]);
-
-  const tutorialFabPosition = React.useMemo(() => {
-    const {width: windowWidth, height: windowHeight} = Dimensions.get('window');
-    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-    if (fabLayout) {
-      const left =
-        fabLayout.x + fabLayout.width / 2 - TUTORIAL_RING_SIZE / 2;
-      const top =
-        fabLayout.y + fabLayout.height / 2 - TUTORIAL_RING_SIZE / 2;
-      return {
-        left: clamp(
-          left,
-          spacing.md,
-          windowWidth - TUTORIAL_RING_SIZE - spacing.md
-        ),
-        top: clamp(
-          top,
-          spacing.md,
-          windowHeight - TUTORIAL_RING_SIZE - (spacing.lg + TAB_BAR_HEIGHT)
-        ),
-      };
-    }
-    return {
-      right: spacing.lg - 18,
-      bottom: spacing.lg + TAB_BAR_HEIGHT - 18,
-    };
-  }, [fabLayout]);
-
-  const tutorialTextPosition = React.useMemo(() => {
-    const {height: windowHeight} = Dimensions.get('window');
-    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-    const baseTop = fabLayout
-      ? fabLayout.y + fabLayout.height / 2 - 32
-      : windowHeight - (TAB_BAR_HEIGHT + 90);
-    return {
-      left: spacing.md,
-      top: clamp(baseTop, spacing.md, windowHeight - 80),
-      width: 260,
-    };
-  }, [fabLayout]);
 
   const selectedAccountIndex = React.useMemo(() => {
     if (!selectedAccount) {
@@ -417,8 +332,6 @@ const DashboardScreen = ({route, navigation}) => {
       // Note: Filtered earning/withdrawal data will be calculated by updateFilteredData()
     } catch (error) {
       console.error('Failed to load accounts:', error);
-    } finally {
-      setIsAccountsLoaded(true);
     }
   };
 
@@ -886,6 +799,22 @@ const DashboardScreen = ({route, navigation}) => {
   const handleDeleteAccount = () => {
     const account = selectedAccountRef.current || selectedAccount;
     if (!account) return;
+    const isSavingAccount = account.account_type === 'saving';
+    if (isSavingAccount) {
+      Alert.alert('Not Allowed', 'Saving account cannot be deleted.');
+      closeContextMenu();
+      return;
+    }
+    const isPrimaryEarning =
+      account.account_type === 'earning' && Number(account.is_primary) === 1;
+    if (isPrimaryEarning) {
+      Alert.alert(
+        'Primary Account',
+        'Primary earning account cannot be deleted. Set another earning account as primary first.'
+      );
+      closeContextMenu();
+      return;
+    }
     const balance = Number(account?.balance) || 0;
     if (Math.abs(balance) > 0.000001) {
       Alert.alert(
@@ -932,6 +861,7 @@ const DashboardScreen = ({route, navigation}) => {
   const openRenameModal = () => {
     const account = selectedAccountRef.current || selectedAccount;
     if (!account) return;
+    setRenameTargetAccount(account);
     setNewAccountName(account?.account_name || ''); // Ensure newAccountName is always a string
     setRenameModalVisible(true);
     closeContextMenu();
@@ -939,16 +869,18 @@ const DashboardScreen = ({route, navigation}) => {
 
   const closeRenameModal = () => {
     setRenameModalVisible(false);
+    setRenameTargetAccount(null);
     setNewAccountName('');
   };
 
   const handleSaveAccountName = async () => {
-    if (!selectedAccount || !newAccountName.trim()) {
+    const account = renameTargetAccount || selectedAccountRef.current || selectedAccount;
+    if (!account || !newAccountName.trim()) {
       Alert.alert('Invalid Name', 'Account name cannot be empty.');
       return;
     }
     try {
-      await renameAccount(selectedAccount.id, newAccountName.trim());
+      await renameAccount(account.id, newAccountName.trim());
       showToast('Account renamed successfully', 'success', 3000);
       loadAccounts(); // Refresh the list
     } catch (e) {
@@ -1107,8 +1039,7 @@ const DashboardScreen = ({route, navigation}) => {
       </View>
       <ScrollView
         style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        pointerEvents={showTutorialStep1 ? 'none' : 'auto'}>
+        showsVerticalScrollIndicator={false}>
         {/* Earning Accounts */}
         <View style={styles.accountsSection}>
           <Text style={styles.sectionTitle}>Earning Accounts</Text>
@@ -1148,6 +1079,79 @@ const DashboardScreen = ({route, navigation}) => {
                           ]}>
                           {renderAccountIcon(
                             account.icon || 'trending-up',
+                            22,
+                            account.icon_color
+                              ? colors.white
+                              : colors.text.primary
+                          )}
+                        </View>
+
+                        <View style={styles.accountDetails}>
+                          <View style={styles.accountHeader}>
+                            <View style={styles.accountHeaderContent}>
+                              <Text style={styles.accountName}>
+                                {account.account_name}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.accountBalanceRow}>
+                            <Text style={styles.accountBalanceLabel}>
+                              Balance{' '}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.accountBalanceAmount,
+                                account.icon_color && {
+                                  color: account.icon_color,
+                                },
+                              ]}>
+                              {formatCurrency(account.balance || 0)}
+                            </Text>
+                          </Text>
+                          <Text style={styles.accountDate}>
+                            Created on{' '}
+                            {new Date(account.created_at).toLocaleDateString(
+                              'en-IN',
+                              {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              }
+                            )}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+
+              <View style={styles.accountsDivider} />
+
+              <Text style={styles.sectionTitle}>Savings Accounts</Text>
+              <View style={styles.accountsList}>
+                {accounts
+                  .filter(account => account.account_type === 'saving')
+                  .map(account => (
+                    <TouchableOpacity
+                      key={account.id}
+                      style={styles.accountItem}
+                      onPress={() => {
+                        navigation.navigate('ExpensesAccountDetail', {account});
+                      }}
+                      onLongPress={() => openContextMenu(account)}>
+                      <View style={styles.badgeContainer} />
+
+                      <View style={styles.accountRow}>
+                        <View
+                          style={[
+                            styles.accountIcon,
+                            {
+                              backgroundColor:
+                                account.icon_color || colors.warningLight,
+                            },
+                          ]}>
+                          {renderAccountIcon(
+                            account.icon || 'wallet',
                             22,
                             account.icon_color
                               ? colors.white
@@ -1279,33 +1283,9 @@ const DashboardScreen = ({route, navigation}) => {
         </View>
       </ScrollView>
 
-      {showTutorialStep1 && (
-        <Modal visible transparent animationType="fade">
-          <View style={styles.tutorialOverlay}>
-            <Text style={[styles.tutorialText, tutorialTextPosition]}>
-              Welcome {userName}
-              {'\n'}Add Your 1st Earning Account
-            </Text>
-            <View style={[styles.tutorialFabHighlight, tutorialFabPosition]}>
-              <View style={styles.tutorialFabRing} />
-              <TouchableOpacity
-                style={styles.tutorialFab}
-                onPress={handleAddAccountPress}>
-                <Icon name="person-add" size={22} color={colors.white} />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-      )}
-
       <TouchableOpacity
         ref={fabRef}
-        style={[styles.fab, showTutorialStep1 && styles.fabHidden]}
-        onLayout={() => {
-          if (showTutorialStep1) {
-            updateFabLayout();
-          }
-        }}
+        style={styles.fab}
         onPress={handleAddAccountPress}>
         <Icon name="person-add" size={22} color={colors.white} />
       </TouchableOpacity>
@@ -1680,50 +1660,6 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 3},
     shadowOpacity: 0.2,
     shadowRadius: 4,
-  },
-  fabHidden: {
-    opacity: 0,
-  },
-  tutorialOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-  },
-  tutorialText: {
-    position: 'absolute',
-    fontSize: 20,
-    color: colors.white,
-    fontFamily: HANDWRITING_FONT,
-    letterSpacing: 0.4,
-    textAlign: 'left',
-  },
-  tutorialFabHighlight: {
-    position: 'absolute',
-    width: TUTORIAL_RING_SIZE,
-    height: TUTORIAL_RING_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tutorialFabRing: {
-    position: 'absolute',
-    width: TUTORIAL_RING_SIZE,
-    height: TUTORIAL_RING_SIZE,
-    borderRadius: TUTORIAL_RING_SIZE / 2,
-    borderWidth: 2,
-    borderColor: colors.white,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  tutorialFab: {
-    width: TUTORIAL_FAB_SIZE,
-    height: TUTORIAL_FAB_SIZE,
-    borderRadius: TUTORIAL_FAB_SIZE / 2,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.black,
-    shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 8,
   },
   // Accounts Section
   accountsSection: {

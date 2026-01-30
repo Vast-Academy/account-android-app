@@ -7,6 +7,7 @@ import LoginScreen from '../screens/LoginScreen';
 import MainTabNavigator from './MainTabNavigator';
 import AccountDetailScreen from '../screens/AccountDetailScreen';
 import ExpensesAccountDetailScreen from '../screens/ExpensesAccountDetailScreen';
+import AmountEntryScreen from '../screens/AmountEntryScreen';
 import LedgerContactDetailScreen from '../screens/LedgerContactDetailScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BackupScreen from '../screens/BackupScreen';
@@ -25,12 +26,14 @@ const AppNavigator = () => {
           headerShown: false,
           cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
           gestureDirection: 'horizontal',
+          gestureResponseDistance: 20,
         }}>
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Home" component={MainTabNavigator} />
         <Stack.Screen name="AccountDetail" component={AccountDetailScreen} />
         <Stack.Screen name="ExpensesAccountDetail" component={ExpensesAccountDetailScreen} />
+        <Stack.Screen name="AmountEntry" component={AmountEntryScreen} />
         <Stack.Screen name="LedgerContactDetail" component={LedgerContactDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Backup" component={BackupScreen} />

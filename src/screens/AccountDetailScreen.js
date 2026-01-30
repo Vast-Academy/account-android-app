@@ -1,4 +1,4 @@
-﻿import React, {useState, useEffect, useCallback, useRef} from 'react';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
   Animated,
   Easing,
   Keyboard,
-  KeyboardAvoidingView,
+  BackHandler,
   InteractionManager,
   PermissionsAndroid,
   Platform,
@@ -31,6 +31,7 @@ import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import DateTimePicker from '@react-native-community/datetimepicker/src/datetimepicker';
+import AmountActionButton from '../components/AmountActionButton';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 import BottomSheet from '../components/BottomSheet';
@@ -212,8 +213,6 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
-  const [addModalVisible, setAddModalVisible] = useState(false);
-  const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
   const [editAmountVisible, setEditAmountVisible] = useState(false);
   const [editRemarkVisible, setEditRemarkVisible] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
@@ -244,14 +243,65 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const scrollViewRef = useRef(null);
-  const addAmountInputRef = useRef(null);
-  const withdrawAmountInputRef = useRef(null);
   const renameInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
   const menuOverlayOpacity = useRef(new Animated.Value(0)).current;
   const menuContentTranslateY = useRef(new Animated.Value(300)).current;
+
+  const isOverlayOpen =
+    editAmountVisible ||
+    editRemarkVisible ||
+    renameModalVisible ||
+    optionsVisible ||
+    menuVisible ||
+    receiptPreviewVisible;
+
+  useEffect(() => {
+    navigation.setOptions({gestureEnabled: !isOverlayOpen});
+    return () => navigation.setOptions({gestureEnabled: true});
+  }, [navigation, isOverlayOpen]);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      if (editAmountVisible) {
+        setEditAmountVisible(false);
+        return true;
+      }
+      if (editRemarkVisible) {
+        setEditRemarkVisible(false);
+        return true;
+      }
+      if (renameModalVisible) {
+        closeRenameModal();
+        return true;
+      }
+      if (optionsVisible) {
+        closeOptionsMenu(true);
+        return true;
+      }
+      if (menuVisible) {
+        closeAccountMenu();
+        return true;
+      }
+      if (receiptPreviewVisible) {
+        closeReceiptPreview();
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [
+    editAmountVisible,
+    editRemarkVisible,
+    renameModalVisible,
+    optionsVisible,
+    menuVisible,
+    receiptPreviewVisible,
+  ]);
 
 
 
@@ -524,9 +574,10 @@ const AccountDetailScreen = ({route, navigation}) => {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       loadMonthStartDay();
+      loadTransactions();
     });
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, loadMonthStartDay, loadTransactions]);
 
   useEffect(() => {
     if (!scrollViewRef.current) {
@@ -547,56 +598,7 @@ const AccountDetailScreen = ({route, navigation}) => {
   }, [transactions]);
 
   useEffect(() => {
-    if (!withdrawModalVisible) {
-      setWithdrawAmount('');
-      setWithdrawNote('');
-      setWithdrawReceiptUri('');
-      setTransferSelectVisible(false);
-    }
-  }, [withdrawModalVisible]);
-
-  useEffect(() => {
-    if (!withdrawModalVisible) { // Load accounts only when modal is visible
-      return;
-    }
-    const loadTransferAccounts = async () => {
-      try {
-        const accountsList = getAllAccounts().filter(
-          item => item.id !== account.id
-        );
-        setTransferAccounts(accountsList);
-        if (accountsList.length === 0) {
-          setTransferTarget(null);
-          return;
-        }
-        const storedId = await AsyncStorage.getItem(
-          TRANSFER_LAST_ACCOUNT_KEY
-        );
-        const selected =
-          accountsList.find(item => String(item.id) === storedId) ||
-          accountsList[0];
-        setTransferTarget(selected);
-      } catch (error) {
-        console.error('Failed to load transfer accounts:', error);
-        setTransferAccounts([]);
-        setTransferTarget(null);
-      }
-    };
-    loadTransferAccounts();
-  }, [withdrawModalVisible, account.id]);
-
-  useEffect(() => {
-    if (addModalVisible || withdrawModalVisible) {
-      setEntryDate(new Date());
-      setShowEntryDatePicker(false);
-      setShowEntryTimePicker(false);
-    }
-  }, [addModalVisible, withdrawModalVisible]);
-
-  useEffect(() => {
     const isAnyModalOpen =
-      addModalVisible ||
-      withdrawModalVisible ||
       editAmountVisible ||
       editRemarkVisible ||
       renameModalVisible;
@@ -611,8 +613,6 @@ const AccountDetailScreen = ({route, navigation}) => {
       modalSlideAnim.setValue(0);
     }
   }, [
-    addModalVisible,
-    withdrawModalVisible,
     editAmountVisible,
     editRemarkVisible,
     renameModalVisible,
@@ -700,83 +700,6 @@ const AccountDetailScreen = ({route, navigation}) => {
     });
   };
 
-  const focusAddAmountInput = useCallback(() => {
-    const focus = () => addAmountInputRef.current?.focus();
-    Keyboard.dismiss();
-    focus();
-    requestAnimationFrame(focus);
-    InteractionManager.runAfterInteractions(focus);
-    setTimeout(focus, 300);
-    setTimeout(focus, 600);
-  }, []);
-
-  const focusWithdrawAmountInput = useCallback(() => {
-    const focus = () => withdrawAmountInputRef.current?.focus();
-    Keyboard.dismiss();
-    focus();
-    requestAnimationFrame(focus);
-    InteractionManager.runAfterInteractions(focus);
-    setTimeout(focus, 300);
-    setTimeout(focus, 600);
-  }, []);
-
-  const focusRenameInput = useCallback(() => {
-    const focus = () => renameInputRef.current?.focus();
-    Keyboard.dismiss();
-    focus();
-    requestAnimationFrame(focus);
-    InteractionManager.runAfterInteractions(focus);
-    setTimeout(focus, 300);
-    setTimeout(focus, 600);
-  }, []);
-
-  useEffect(() => {
-    if (!addModalVisible) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      focusAddAmountInput();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [addModalVisible, focusAddAmountInput]);
-
-  useEffect(() => {
-    if (!withdrawModalVisible) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      focusWithdrawAmountInput();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [withdrawModalVisible, focusWithdrawAmountInput]);
-
-  useEffect(() => {
-    if (!renameModalVisible) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      focusRenameInput();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [renameModalVisible, focusRenameInput]);
-
-  const handleTogglePrimary = async () => {
-    try {
-      const newPrimaryStatus = !isPrimary;
-      await updateAccountPrimary(account.id, newPrimaryStatus);
-      setIsPrimary(newPrimaryStatus);
-      Alert.alert(
-        'Success',
-        newPrimaryStatus
-          ? 'This account is now set as your primary earning account'
-          : 'Primary status removed from this account'
-      );
-    } catch (error) {
-      console.error('Failed to update primary status:', error);
-      Alert.alert('Error', 'Failed to update primary status. Please try again.');
-    }
-  };
-
   const isFutureEntryDate = value => {
     if (!(value instanceof Date)) {
       return false;
@@ -784,23 +707,25 @@ const AccountDetailScreen = ({route, navigation}) => {
     return value.getTime() > Date.now();
   };
 
-  const handleAddEntry = async () => {
-    // Validation
-    if (!amount || parseFloat(amount) <= 0) {
+  const handleAddEntry = async (overrides = {}) => {
+    const nextAmount = overrides.amount ?? amount;
+    const nextEntryDate = overrides.entryDate ?? entryDate;
+
+    if (!nextAmount || parseFloat(nextAmount) <= 0) {
       showToast('Please enter a valid amount.', 'error');
       return false;
     }
 
-    const remark = addNote.trim();
+    const remark = (overrides.addNote ?? addNote).trim();
 
     setLoading(true);
     try {
-      const amountValue = parseFloat(amount);
-      if (isFutureEntryDate(entryDate)) {
+      const amountValue = parseFloat(nextAmount);
+      if (isFutureEntryDate(nextEntryDate)) {
         showToast('Future entry not allowed.', 'error');
         return false;
       }
-      const entryTimestamp = entryDate.getTime();
+      const entryTimestamp = nextEntryDate.getTime();
 
       if (scheduleType === 'once') {
         // Create immediate transaction
@@ -840,22 +765,26 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
   };
 
-  const handleWithdraw = async () => {
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+  const handleWithdraw = async (overrides = {}) => {
+    const nextAmount = overrides.amount ?? withdrawAmount;
+    const nextEntryDate = overrides.entryDate ?? entryDate;
+    const nextReceiptUri = overrides.receiptUri ?? withdrawReceiptUri;
+
+    if (!nextAmount || parseFloat(nextAmount) <= 0) {
       showToast('Please enter a valid amount.', 'error');
       return false;
     }
 
-    const remark = withdrawNote.trim();
+    const remark = (overrides.note ?? withdrawNote).trim();
 
     setLoading(true);
     try {
-      const amountValue = Math.abs(parseFloat(withdrawAmount));
-      if (isFutureEntryDate(entryDate)) {
+      const amountValue = Math.abs(parseFloat(nextAmount));
+      if (isFutureEntryDate(nextEntryDate)) {
         showToast('Future entry not allowed.', 'error');
         return false;
       }
-      const entryTimestamp = entryDate.getTime();
+      const entryTimestamp = nextEntryDate.getTime();
       if (!canWithdrawAtTimestamp(amountValue, entryTimestamp)) {
         showToast(
           'Withdrawal not allowed. Balance was insufficient at that time.',
@@ -868,9 +797,9 @@ const AccountDetailScreen = ({route, navigation}) => {
         return false;
       }
       let receiptPath = '';
-      if (withdrawReceiptUri) {
+      if (nextReceiptUri) {
         try {
-          receiptPath = await persistReceiptImage(withdrawReceiptUri);
+          receiptPath = await persistReceiptImage(nextReceiptUri);
         } catch (error) {
           console.error('Failed to save receipt image:', error);
           showToast('Failed to save bill photo.', 'error');
@@ -894,22 +823,26 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
   };
 
-  const handleTransfer = async targetAccount => {
-    if (!targetAccount) {
+  const handleTransfer = async (targetAccount, overrides = {}) => {
+    const nextTargetAccount = overrides.targetAccount ?? targetAccount;
+    const nextAmount = overrides.amount ?? withdrawAmount;
+    const nextEntryDate = overrides.entryDate ?? entryDate;
+
+    if (!nextTargetAccount) {
       Alert.alert('Select Account', 'Please select a transfer account.');
       return false;
     }
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+    if (!nextAmount || parseFloat(nextAmount) <= 0) {
       showToast('Please enter a valid amount.', 'error');
       return false;
     }
 
-    const amountValue = Math.abs(parseFloat(withdrawAmount));
-    if (isFutureEntryDate(entryDate)) {
+    const amountValue = Math.abs(parseFloat(nextAmount));
+    if (isFutureEntryDate(nextEntryDate)) {
       showToast('Future entry not allowed.', 'error');
       return false;
     }
-    const entryTimestamp = entryDate.getTime();
+    const entryTimestamp = nextEntryDate.getTime();
     if (!canWithdrawAtTimestamp(amountValue, entryTimestamp)) {
       showToast(
         'Transfer not allowed. Balance was insufficient at that time.',
@@ -922,20 +855,25 @@ const AccountDetailScreen = ({route, navigation}) => {
       return false;
     }
 
-    await handleTransferToAccount(targetAccount, amountValue);
+    await handleTransferToAccount(nextTargetAccount, amountValue, overrides);
     return true;
   };
 
-  const handleTransferToAccount = async (targetAccount, amountValueOverride) => {
+  const handleTransferToAccount = async (
+    targetAccount,
+    amountValueOverride,
+    overrides = {},
+  ) => {
     const amountValue = amountValueOverride ?? transferAmount;
     if (!targetAccount || !amountValue) {
       return;
     }
-    if (isFutureEntryDate(entryDate)) {
+    const nextEntryDate = overrides.entryDate ?? entryDate;
+    if (isFutureEntryDate(nextEntryDate)) {
       showToast('Future entry not allowed.', 'error');
       return;
     }
-    const transferNote = withdrawNote.trim();
+    const transferNote = (overrides.note ?? withdrawNote).trim();
     const toRemark = transferNote
       ? `Transferred to ${targetAccount.account_name} - ${transferNote}`
       : `Transferred to ${targetAccount.account_name}`;
@@ -944,7 +882,7 @@ const AccountDetailScreen = ({route, navigation}) => {
       : `Transferred from ${account.account_name}`;
     setLoading(true);
     try {
-      const entryTimestamp = entryDate.getTime();
+      const entryTimestamp = nextEntryDate.getTime();
       await createTransaction(
         account.id,
         -amountValue,
@@ -978,6 +916,80 @@ const AccountDetailScreen = ({route, navigation}) => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const result = route.params?.amountEntryResult;
+    if (!result) {
+      return;
+    }
+
+    const clearResultParam = () => {
+      navigation.setParams({amountEntryResult: undefined});
+    };
+
+    if (result.accountId != null && String(result.accountId) !== String(account.id)) {
+      clearResultParam();
+      return;
+    }
+
+    const nextEntryDate = result.entryDateIso
+      ? new Date(result.entryDateIso)
+      : entryDate;
+    const nextAmount = result.amount ?? '';
+    const nextNote = result.note ?? '';
+
+    const applyResult = async () => {
+      try {
+        if (result.action === 'add') {
+          await handleAddEntry({
+            amount: nextAmount,
+            addNote: nextNote,
+            entryDate: nextEntryDate,
+          });
+          return;
+        }
+
+        if (result.action === 'withdraw') {
+          await handleWithdraw({
+            amount: nextAmount,
+            note: nextNote,
+            entryDate: nextEntryDate,
+          });
+          return;
+        }
+
+        if (result.action === 'transfer') {
+          const accounts = getAllAccounts();
+          const targetAccount = accounts.find(
+            acc => acc.id === result.targetAccountId,
+          );
+          if (!targetAccount) {
+            showToast('Please select a valid transfer account.', 'error');
+            return;
+          }
+          await handleTransfer(targetAccount, {
+            amount: nextAmount,
+            note: nextNote,
+            entryDate: nextEntryDate,
+            targetAccount,
+          });
+        }
+      } finally {
+        clearResultParam();
+      }
+    };
+
+    applyResult();
+  }, [
+    route.params?.amountEntryResult,
+    navigation,
+    account.id,
+    entryDate,
+    handleAddEntry,
+    handleWithdraw,
+    handleTransfer,
+    showToast,
+  ]);
 
   const isTransferTransaction = txn => {
     const remark = String(txn?.remark || '').trim().toLowerCase();
@@ -1861,6 +1873,7 @@ const AccountDetailScreen = ({route, navigation}) => {
                       style={[
                         styles.chatAmount,
                         Number(txn.amount) < 0 && styles.chatAmountDebit,
+                        isTransfer && styles.chatAmountTransfer,
                         isDeleted && styles.chatAmountDeleted,
                       ]}>
                       {(Number(txn.amount) < 0 ? '-' : '+') +
@@ -2122,333 +2135,29 @@ const AccountDetailScreen = ({route, navigation}) => {
           <TouchableOpacity
             style={styles.earningPrimaryButton}
             onPress={() => {
-              setWithdrawModalVisible(true);
-              focusWithdrawAmountInput();
+              navigation.navigate('AmountEntry', {
+                mode: 'withdraw',
+                account,
+                prevRouteKey: route.key,
+                initialEntryDate: entryDate.toISOString(),
+              });
             }}>
             <Text style={styles.earningPrimaryText}>Withdraw / Transfer</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.earningSecondaryButton}
             onPress={() => {
-              setAddModalVisible(true);
-              focusAddAmountInput();
+              navigation.navigate('AmountEntry', {
+                mode: 'add',
+                account,
+                prevRouteKey: route.key,
+                initialEntryDate: entryDate.toISOString(),
+              });
             }}>
             <Text style={styles.earningSecondaryTextDark}>Add Ammount</Text>
           </TouchableOpacity>
         </View>
       </View>
-
-      <Modal
-        visible={addModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setAddModalVisible(false)}>
-        <KeyboardAvoidingView
-          style={styles.addFullScreen}
-          behavior="padding">
-          <View style={styles.addHeader}>
-            <TouchableOpacity
-              style={styles.addHeaderButton}
-              onPress={() => {
-                setAddModalVisible(false);
-                setAddNote('');
-                setAmount('');
-              }}>
-              <Icon name="arrow-back" size={22} color={colors.text.primary} />
-            </TouchableOpacity>
-            <Text style={styles.addHeaderTitle}>Add Amount</Text>
-            <View style={styles.addHeaderSpacer} />
-          </View>
-          <View style={styles.addContent}>
-            <View style={styles.addCenterBlock}>
-              <View style={styles.addAmountBlock}>
-                <Text style={styles.addCurrencySymbol}>{currencySymbol}</Text>
-            <TextInput
-              style={styles.addAmountInput}
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="numeric"
-              placeholder="0"
-              placeholderTextColor="#C0C4CC"
-              autoFocus
-              ref={addAmountInputRef}
-              showSoftInputOnFocus
-              editable={!loading}
-            />
-              </View>
-              <TextInput
-                style={styles.addNoteInput}
-                value={addNote}
-                onChangeText={setAddNote}
-                placeholder="Add note"
-                placeholderTextColor={colors.text.light}
-                multiline
-                numberOfLines={2}
-                editable={!loading}
-              />
-            </View>
-            <View style={styles.addBottomBlock}>
-              <View style={styles.addScheduleSection}>
-                {showEntryDateTime && (
-                  <View style={styles.entryDateTimeRow}>
-                    <TouchableOpacity
-                      style={styles.entryDateTimeButton}
-                      onPress={() => setShowEntryDatePicker(true)}>
-                      <Text style={styles.entryDateTimeLabel}>Date</Text>
-                      <Text style={styles.entryDateTimeValue}>
-                        {formatEntryDate(entryDate)}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.entryDateTimeButton}
-                      onPress={() => setShowEntryTimePicker(true)}>
-                      <Text style={styles.entryDateTimeLabel}>Time</Text>
-                      <Text style={styles.entryDateTimeValue}>
-                        {formatEntryTime(entryDate)}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                {showEntryDatePicker && (
-                  <DateTimePicker
-                    value={entryDate}
-                    mode="date"
-                    display="default"
-                    maximumDate={new Date()}
-                    onChange={handleEntryDateChange}
-                  />
-                )}
-                {showEntryTimePicker && (
-                  <DateTimePicker
-                    value={entryDate}
-                    mode="time"
-                    display="default"
-                    maximumDate={new Date()}
-                    onChange={handleEntryTimeChange}
-                  />
-                )}
-              </View>
-              <View style={styles.addCtaContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.addCtaButton,
-                    loading && styles.buttonDisabled,
-                  ]}
-                  onPress={async () => {
-                    const didAdd = await handleAddEntry();
-                    if (didAdd) {
-                      setAddModalVisible(false);
-                    }
-                  }}
-                  disabled={loading}>
-                  {loading ? (
-                    <ActivityIndicator color={colors.text.primary} />
-                  ) : (
-                    <Text style={styles.addCtaText}>Add Amount</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal
-        visible={withdrawModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setWithdrawModalVisible(false)}>
-        <KeyboardAvoidingView
-          style={styles.addFullScreen}
-          behavior="padding">
-          <View style={styles.addHeader}>
-            <TouchableOpacity
-              style={styles.addHeaderButton}
-              onPress={() => {
-                setWithdrawModalVisible(false);
-                setWithdrawAmount('');
-                setWithdrawNote('');
-                setTransferSelectVisible(false);
-              }}>
-              <Icon name="arrow-back" size={22} color={colors.text.primary} />
-            </TouchableOpacity>
-            <Text style={styles.addHeaderTitle}>Withdraw / Transfer</Text>
-            <View style={styles.addHeaderSpacer} />
-          </View>
-          <ScrollView contentContainerStyle={styles.withdrawScrollContainer} keyboardShouldPersistTaps="handled">
-            <View style={styles.withdrawCenterBlock}>
-              <View style={styles.withdrawAmountBlock}>
-                <Text style={styles.addCurrencySymbol}>{currencySymbol}</Text>
-                <TextInput
-                  style={styles.addAmountInput}
-                  value={withdrawAmount}
-                  onChangeText={setWithdrawAmount}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  placeholderTextColor="#C0C4CC"
-                  autoFocus
-                  ref={withdrawAmountInputRef}
-                  showSoftInputOnFocus
-                  editable={!loading}
-                />
-              </View>
-              <View style={styles.noteInputWithAttach}>
-                <TextInput
-                  style={[styles.withdrawNoteInput, {paddingRight: 40, paddingLeft: 40, textAlign: 'center'}]}
-                  value={withdrawNote}
-                  onChangeText={setWithdrawNote}
-                  placeholder="Add note"
-                  placeholderTextColor={colors.text.light}
-                  multiline
-                  numberOfLines={2}
-                  editable={!loading}
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.attachButton,
-                    transferSelectVisible && styles.attachButtonDisabled,
-                  ]}
-                  onPress={handleAddReceipt}
-                  disabled={loading || transferSelectVisible}>
-                  <Icon
-                    name="camera-outline"
-                    size={20}
-                    color={
-                      transferSelectVisible
-                        ? colors.text.light
-                        : colors.text.secondary
-                    }
-                  />
-                </TouchableOpacity>
-              </View>
-              {withdrawReceiptUri ? (
-                <View style={styles.receiptPreviewRow}>
-                  <Pressable
-                    style={styles.receiptThumbWrapper}
-                    onPress={() => openReceiptPreview(withdrawReceiptUri)}>
-                    <Image
-                      source={{uri: normalizeImageUri(withdrawReceiptUri)}}
-                      style={styles.receiptThumb}
-                    />
-                  </Pressable>
-                  <TouchableOpacity
-                    style={styles.receiptRemoveButton}
-                    onPress={handleRemoveReceipt}>
-                    <Text style={styles.receiptRemoveText}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
-            </View>
-            <View style={styles.withdrawBottomBlock}>
-              <View style={styles.entryDateTimeRow}>
-                <TouchableOpacity
-                  style={styles.entryDateTimeButton}
-                  onPress={() => setShowEntryDatePicker(true)}>
-                  <Text style={styles.entryDateTimeLabel}>Date</Text>
-                  <Text style={styles.entryDateTimeValue}>
-                    {formatEntryDate(entryDate)}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.entryDateTimeButton}
-                  onPress={() => setShowEntryTimePicker(true)}>
-                  <Text style={styles.entryDateTimeLabel}>Time</Text>
-                  <Text style={styles.entryDateTimeValue}>
-                    {formatEntryTime(entryDate)}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              {showEntryDatePicker && (
-                <DateTimePicker
-                  value={entryDate}
-                  mode="date"
-                  display="default"
-                  maximumDate={new Date()}
-                  onChange={handleEntryDateChange}
-                />
-              )}
-              {showEntryTimePicker && (
-                <DateTimePicker
-                  value={entryDate}
-                  mode="time"
-                  display="default"
-                  maximumDate={new Date()}
-                  onChange={handleEntryTimeChange}
-                />
-              )}
-              <View style={styles.withdrawActionButtons}>
-                <TouchableOpacity
-                  style={styles.withdrawSecondaryButton}
-                  onPress={() => {
-                    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-                        showToast('Please enter a valid amount.', 'error');
-                        return;
-                    }
-                    setTransferSelectVisible(true);
-                  }}
-                  disabled={loading}>
-                  {loading ? (
-                    <ActivityIndicator color="#1D4ED8" />
-                  ) : (
-                    <Text style={styles.withdrawSecondaryText}>Transfer</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.withdrawPrimaryButton}
-                  onPress={async () => {
-                    const didAdd = await handleWithdraw();
-                    if (didAdd) {
-                      setWithdrawModalVisible(false);
-                    }
-                  }}
-                  disabled={loading}>
-                  {loading ? (
-                    <ActivityIndicator color="#1D4ED8" />
-                  ) : (
-                    <Text style={styles.withdrawPrimaryText}>Withdraw</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-              {transferSelectVisible && (
-                <View style={{marginTop: spacing.md}}>
-                  <Text style={styles.modalTitle}>Select Account to Transfer</Text>
-                  <View style={styles.pickerContainer}>
-                    <Picker
-                      selectedValue={transferTarget?.id}
-                      onValueChange={itemValue => {
-                        const selected = transferAccounts.find(
-                          acc => acc.id === itemValue
-                        );
-                        setTransferTarget(selected);
-                      }}>
-                      {transferAccounts.map(account => (
-                        <Picker.Item
-                          key={account.id}
-                          label={account.account_name}
-                          value={account.id}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.modalAddButton, {marginTop: spacing.md}]}
-                    onPress={async () => {
-                      const didTransfer = await handleTransfer(transferTarget);
-                      if (didTransfer) {
-                        setTransferSelectVisible(false);
-                        setWithdrawModalVisible(false);
-                      }
-                    }}
-                    disabled={loading || !transferTarget}>
-                    <Text style={styles.modalAddButtonText}>Confirm Transfer</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
 
       <BottomSheet
         visible={isBottomSheetVisible}
@@ -2513,7 +2222,7 @@ const AccountDetailScreen = ({route, navigation}) => {
               </Text>
               {isDeletedTransaction(selectedTransaction) && (
                 <Text style={styles.optionsSubtitle}>
-                  Deleted entry can’t be edited.
+                  Deleted entry can�t be edited.
                 </Text>
               )}
             </View>
@@ -2921,6 +2630,17 @@ const AccountDetailScreen = ({route, navigation}) => {
               style={[styles.optionButton, styles.optionDelete]}
               onPress={() => {
                 closeAccountMenu();
+                if (account.account_type === 'saving') {
+                  Alert.alert('Not Allowed', 'Saving account cannot be deleted.');
+                  return;
+                }
+                if (isPrimary) {
+                  Alert.alert(
+                    'Primary Account',
+                    'Primary earning account cannot be deleted. Set another earning account as primary first.'
+                  );
+                  return;
+                }
                 if (Math.abs(Number(totalBalance) || 0) > 0.000001) {
                   Alert.alert(
                     'Balance Not Settled',
@@ -3478,8 +3198,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#16A34A',
+    borderWidth: 0.4,
+    borderColor: '#4ADE80',
   },
   addCtaText: {
     fontSize: fontSize.regular - 1,
@@ -4196,7 +3916,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#FCA5A5',
+    borderColor: '#FECACA',
   },
   earningPrimaryText: {
     fontSize: fontSize.regular - 1,
@@ -4209,8 +3929,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: spacing.md,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#16A34A',
+    borderWidth: 0.6,
+    borderColor: '#4ADE80',
   },
   earningSecondaryText: {
     fontSize: fontSize.regular - 1,
@@ -4259,7 +3979,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#EF4444',
+    borderColor: '#FECACA',
   },
   withdrawPrimaryText: {
     fontSize: fontSize.regular - 1,
@@ -4283,3 +4003,4 @@ const styles = StyleSheet.create({
 });
 
 export default AccountDetailScreen;
+

@@ -4,12 +4,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { checkAuthStatus, getFirebaseToken } from '../utils/tokenManager';
 import { getUserDetails } from '../services/api';
 import { isSetupComplete } from '../services/userSetup';
+import {notificationService} from '../services/NotificationService';
 
 const SplashScreen = ({ navigation }) => {
   const checkAuthentication = useCallback(async () => {
     try {
       // Show splash for minimum 1.5 seconds
       await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Trigger notification permission on app start from Splash
+      await notificationService.ensureExpenseRemindersScheduled();
 
       // Check if user is authenticated
       const authStatus = await checkAuthStatus();

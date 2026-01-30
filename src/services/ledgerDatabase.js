@@ -408,4 +408,22 @@ export const initLedgerDatabase = () => {
           return {};
         }
       };
+
+      // Get distinct contact IDs that have ledger transactions
+      export const getDistinctContactRecordIds = () => {
+        try {
+          const db = getDB();
+          const result = db.execute(`
+            SELECT DISTINCT contact_record_id
+            FROM ledger_transactions
+          `);
+          const rows = result.rows?._array || [];
+          return rows
+            .map(row => String(row.contact_record_id || '').trim())
+            .filter(Boolean);
+        } catch (error) {
+          console.error('Failed to get distinct contact IDs:', error);
+          return [];
+        }
+      };
       

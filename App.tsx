@@ -11,14 +11,12 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/context/ToastContext';
 import ToastContainer from './src/components/ToastContainer';
 import './src/services/NotificationService';
-import {notificationService} from './src/services/NotificationService';
 
 function App() {
   useEffect(() => {
     GoogleSignin.configure({
       webClientId: '787026486912-0od795pc1mv0tffcu13usmq73i0vvvkv.apps.googleusercontent.com',
     });
-    notificationService.ensureExpenseRemindersScheduled();
   }, []);
 
   return (

@@ -15,6 +15,7 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { auth } from '../config/firebase';
 import { clearLocalData } from '../services/database';
 import { useFocusEffect } from '@react-navigation/native';
+import {notificationService} from '../services/NotificationService';
 
 const HomeScreen = ({ route, navigation }) => {
   const [user, setUser] = useState(null);
@@ -27,10 +28,20 @@ const HomeScreen = ({ route, navigation }) => {
     const loadUser = async () => {
       if (route.params?.user) {
         setUser(route.params.user);
+        try {
+          await notificationService.ensureExpenseRemindersScheduled();
+        } catch (error) {
+          console.warn('Failed to schedule expense reminders:', error);
+        }
       } else {
         const storedUser = await AsyncStorage.getItem('user');
         if (storedUser) {
           setUser(JSON.parse(storedUser));
+          try {
+            await notificationService.ensureExpenseRemindersScheduled();
+          } catch (error) {
+            console.warn('Failed to schedule expense reminders:', error);
+          }
         } else {
           navigation.replace('Login');
         }

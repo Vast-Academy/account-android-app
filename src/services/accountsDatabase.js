@@ -25,6 +25,10 @@ const BROWN_500 = '#A16207';
 const CYAN_500 = '#06B6D4';
 const PINK_500 = '#EC4899';
 const GRAY_500 = '#6B7280';
+const ACCOUNT_TYPE_CHECK_SQL = "('earning', 'expenses', 'saving')";
+const DEFAULT_SAVING_ACCOUNT_NAME = 'Saving Account';
+const DEFAULT_SAVING_ACCOUNT_ICON = 'wallet-outline';
+const DEFAULT_SAVING_ACCOUNT_COLOR = TEAL_500;
 
 const COLOR_MIGRATION_MAP = {
   [LEGACY_RED_400]: BROWN_500,
@@ -43,7 +47,7 @@ const COLOR_MIGRATION_MAP = {
   [LEGACY_MAGENTA_500]: PINK_500,
 };
 
-const migrateAccountTypeToExpenses = db => {
+const migrateAccountTypeConstraintToIncludeSaving = db => {
   let startedTransaction = false;
   try {
     const schemaResult = db.execute(
@@ -51,7 +55,7 @@ const migrateAccountTypeToExpenses = db => {
     );
     const schemaSql = schemaResult.rows?._array?.[0]?.sql || '';
     const needsTableRebuild =
-      schemaSql.includes('account_type') && !schemaSql.includes("'expenses'");
+      schemaSql.includes('account_type') && !schemaSql.includes("'saving'");
 
     if (needsTableRebuild) {
       db.execute('BEGIN');
@@ -60,7 +64,7 @@ const migrateAccountTypeToExpenses = db => {
         CREATE TABLE accounts_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           account_name TEXT NOT NULL,
-          account_type TEXT NOT NULL CHECK(account_type IN ('earning', 'expenses')),
+          account_type TEXT NOT NULL CHECK(account_type IN ${ACCOUNT_TYPE_CHECK_SQL}),
           icon TEXT,
           icon_color TEXT,
           balance REAL DEFAULT 0,
@@ -74,7 +78,7 @@ const migrateAccountTypeToExpenses = db => {
         `INSERT INTO accounts_new (id, account_name, account_type, icon, icon_color, balance, is_primary, sort_index, created_at, updated_at)
          SELECT id, account_name,
                 CASE
-                  WHEN account_type NOT IN ('earning', 'expenses')
+                  WHEN account_type NOT IN ${ACCOUNT_TYPE_CHECK_SQL}
                     THEN 'expenses'
                   ELSE account_type
                 END,
@@ -88,7 +92,7 @@ const migrateAccountTypeToExpenses = db => {
     }
 
     db.execute(
-      "UPDATE accounts SET account_type = 'expenses' WHERE account_type NOT IN ('earning', 'expenses')"
+      `UPDATE accounts SET account_type = 'expenses' WHERE account_type NOT IN ${ACCOUNT_TYPE_CHECK_SQL}`
     );
   } catch (error) {
     if (startedTransaction) {
@@ -98,7 +102,67 @@ const migrateAccountTypeToExpenses = db => {
         console.warn('Failed to rollback account type migration:', rollbackError);
       }
     }
-    console.warn('Failed to migrate account type to expenses:', error);
+    console.warn('Failed to migrate account type constraint:', error);
+  }
+};
+
+const getAccountById = (db, id) => {
+  try {
+    const result = db.execute('SELECT * FROM accounts WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    return result.rows?._array?.[0] || null;
+  } catch (error) {
+    console.warn('Failed to get account by id:', error);
+    return null;
+  }
+};
+
+const getProtectedAccountDeleteMessage = account => {
+  if (!account) {
+    return 'This account cannot be deleted.';
+  }
+  if (account.account_type === 'saving') {
+    return 'Saving account cannot be deleted.';
+  }
+  if (account.account_type === 'earning' && Number(account.is_primary) === 1) {
+    return 'Primary earning account cannot be deleted. Set another earning account as primary first.';
+  }
+  return 'This account cannot be deleted.';
+};
+
+const ensureDefaultSavingAccount = db => {
+  try {
+    const savingCountResult = db.execute(
+      "SELECT COUNT(*) as count FROM accounts WHERE account_type = 'saving'"
+    );
+    const savingCount = savingCountResult.rows?._array?.[0]?.count ?? 0;
+    if (savingCount > 0) {
+      return;
+    }
+
+    const timestamp = Date.now();
+    const minResult = db.execute(
+      'SELECT MIN(sort_index) as minIndex FROM accounts'
+    );
+    const minIndex = minResult.rows?._array?.[0]?.minIndex;
+    const sortIndex = Number.isFinite(minIndex) ? minIndex - 1 : 0;
+
+    db.execute(
+      `INSERT INTO accounts (account_name, account_type, icon, icon_color, balance, is_primary, sort_index, created_at, updated_at)
+       VALUES (?, 'saving', ?, ?, 0, 0, ?, ?, ?)`,
+      [
+        DEFAULT_SAVING_ACCOUNT_NAME,
+        DEFAULT_SAVING_ACCOUNT_ICON,
+        DEFAULT_SAVING_ACCOUNT_COLOR,
+        sortIndex,
+        timestamp,
+        timestamp,
+      ]
+    );
+    console.log('Default saving account created.');
+  } catch (error) {
+    console.warn('Failed to ensure default saving account:', error);
   }
 };
 
@@ -132,7 +196,7 @@ export const initAccountsDatabase = () => {
       CREATE TABLE IF NOT EXISTS accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_name TEXT NOT NULL,
-        account_type TEXT NOT NULL CHECK(account_type IN ('earning', 'expenses')),
+        account_type TEXT NOT NULL CHECK(account_type IN ${ACCOUNT_TYPE_CHECK_SQL}),
         icon TEXT,
         icon_color TEXT,
         balance REAL DEFAULT 0,
@@ -164,7 +228,7 @@ export const initAccountsDatabase = () => {
     } catch (e) {
       // Column already exists, ignore
     }
-    migrateAccountTypeToExpenses(db);
+    migrateAccountTypeConstraintToIncludeSaving(db);
     try {
       Object.entries(COLOR_MIGRATION_MAP).forEach(([oldColor, newColor]) => {
         db.execute('UPDATE accounts SET icon_color = ? WHERE icon_color = ?', [
@@ -197,6 +261,8 @@ export const initAccountsDatabase = () => {
     } catch (e) {
       console.warn('Failed to backfill sort_index:', e);
     }
+
+    ensureDefaultSavingAccount(db);
 
     console.log('Accounts database initialized successfully');
   } catch (error) {
@@ -348,6 +414,13 @@ export const updateAccount = async (id, accountName, accountType) => {
 export const deleteAccount = async (id) => {
   try {
     const db = getDB();
+    const account = getAccountById(db, id);
+    const isPrimaryEarning =
+      account?.account_type === 'earning' && Number(account?.is_primary) === 1;
+    const isSavingAccount = account?.account_type === 'saving';
+    if (isPrimaryEarning || isSavingAccount) {
+      throw new Error(getProtectedAccountDeleteMessage(account));
+    }
     db.execute('DELETE FROM accounts WHERE id = ?', [id]);
     console.log('Account deleted successfully');
     queueBackupFromStorage();
@@ -379,9 +452,16 @@ export const renameAccount = async (id, newName) => {
 // Delete account and all its transactions
 export const deleteAccountAndTransactions = async (id) => {
   try {
-    // First, delete all transactions associated with the account
+    const db = getDB();
+    const account = getAccountById(db, id);
+    const isPrimaryEarning =
+      account?.account_type === 'earning' && Number(account?.is_primary) === 1;
+    const isSavingAccount = account?.account_type === 'saving';
+    if (isPrimaryEarning || isSavingAccount) {
+      throw new Error(getProtectedAccountDeleteMessage(account));
+    }
+
     await deleteTransactionsByAccount(id);
-    // Then, delete the account itself
     await deleteAccount(id);
     console.log(`Account ${id} and all its transactions deleted successfully.`);
     queueBackupFromStorage();

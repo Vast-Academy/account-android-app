@@ -33,6 +33,7 @@ import {
   getContactNickname,
   deleteContactNickname,
   getLatestTransactionDateByContact,
+  getDistinctContactRecordIds,
 } from '../services/ledgerDatabase';
 
 const CONTACTS_STORAGE_KEY = 'ledgerContacts';
@@ -55,6 +56,7 @@ const LedgerScreen = ({navigation}) => {
     netBalance: 0,
   });
   const [latestTransactionDates, setLatestTransactionDates] = useState({});
+  const [dbContactIds, setDbContactIds] = useState([]);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const contactsFetchInFlight = useRef(false);
 
@@ -75,22 +77,83 @@ const LedgerScreen = ({navigation}) => {
     const loadStoredData = async () => {
       try {
         initLedgerDatabase();
+        const distinctIds = getDistinctContactRecordIds();
+        setDbContactIds(distinctIds);
+
+        // Load cached device contacts to help rebuild contact entries by recordID
+        let cachedDeviceContacts = [];
+        try {
+          const cachedRaw = await AsyncStorage.getItem(DEVICE_CONTACTS_CACHE_KEY);
+          const cachedParsed = cachedRaw ? JSON.parse(cachedRaw) : [];
+          if (Array.isArray(cachedParsed)) {
+            cachedDeviceContacts = cachedParsed;
+          }
+        } catch (cacheError) {
+          console.error('Failed to load cached device contacts:', cacheError);
+        }
+
         const stored = await AsyncStorage.getItem(CONTACTS_STORAGE_KEY);
+        let storedContacts = [];
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed)) {
-            // Fetch nicknames for stored contacts
-            const contactsWithNicknames = await Promise.all(parsed.map(async (contact) => {
-                const nickname = await getContactNickname(contact.recordID);
-                return { ...contact, nickname: nickname || null };
-            }));
-            setContacts(contactsWithNicknames);
+            storedContacts = parsed;
           }
         }
+
+        // Reconcile contacts from three sources:
+        // 1) stored contacts, 2) cached device contacts, 3) DB transaction contact IDs
+        const cachedById = new Map(
+          cachedDeviceContacts.map(contact => [String(contact.recordID), contact]),
+        );
+        const storedById = new Map(
+          storedContacts.map(contact => [String(contact.recordID), contact]),
+        );
+
+        const mergedIdSet = new Set([
+          ...storedById.keys(),
+          ...distinctIds.map(id => String(id)),
+        ]);
+
+        const reconciledContacts = Array.from(mergedIdSet).map(recordID => {
+          const storedContact = storedById.get(recordID);
+          if (storedContact) {
+            return storedContact;
+          }
+          const cachedContact = cachedById.get(recordID);
+          if (cachedContact) {
+            return cachedContact;
+          }
+          return {
+            recordID,
+            displayName: 'Unknown Contact',
+            givenName: '',
+            familyName: '',
+            phoneNumbers: [],
+          };
+        });
+
+        // Fetch nicknames for reconciled contacts
+        const contactsWithNicknames = await Promise.all(
+          reconciledContacts.map(async contact => {
+            const nickname = await getContactNickname(contact.recordID);
+            return {...contact, nickname: nickname || null};
+          }),
+        );
+        setContacts(contactsWithNicknames);
         const storedPinned = await AsyncStorage.getItem(PINNED_CONTACT_IDS_STORAGE_KEY);
         if (storedPinned) {
           const parsedPinned = JSON.parse(storedPinned);
-          setPinnedContactIds(Array.isArray(parsedPinned) ? parsedPinned : []);
+          if (Array.isArray(parsedPinned)) {
+            const reconciledIds = new Set(
+              contactsWithNicknames.map(contact => String(contact.recordID)),
+            );
+            setPinnedContactIds(
+              parsedPinned.filter(id => reconciledIds.has(String(id))),
+            );
+          } else {
+            setPinnedContactIds([]);
+          }
         }
       } catch (error) {
         console.error('Failed to load stored data:', error);
@@ -185,9 +248,16 @@ const LedgerScreen = ({navigation}) => {
       }
     };
     if (contactsHydrated) {
-      persistContacts();
+      const contactIdSet = new Set(contacts.map(c => String(c.recordID)));
+      const missingDbIds = dbContactIds.filter(id => !contactIdSet.has(String(id)));
+      const shouldSkipPersist =
+        dbContactIds.length > 0 && (contacts.length === 0 || missingDbIds.length > 0);
+
+      if (!shouldSkipPersist) {
+        persistContacts();
+      }
     }
-  }, [contacts, contactsHydrated]);
+  }, [contacts, contactsHydrated, dbContactIds]);
 
   useEffect(() => {
     // Persist pinned IDs
