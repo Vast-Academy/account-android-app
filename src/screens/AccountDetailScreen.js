@@ -32,6 +32,7 @@ import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import DateTimePicker from '@react-native-community/datetimepicker/src/datetimepicker';
 import AmountActionButton from '../components/AmountActionButton';
+import RenameAccountModal from '../components/RenameAccountModal';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 import BottomSheet from '../components/BottomSheet';
@@ -242,6 +243,7 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [availableYears, setAvailableYears] = useState([]);
   const [filteredAdded, setFilteredAdded] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
+  const [filteredTransactions, setFilteredTransactions] = useState([]);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const scrollViewRef = useRef(null);
   const renameInputRef = useRef(null);
@@ -258,6 +260,14 @@ const AccountDetailScreen = ({route, navigation}) => {
     optionsVisible ||
     menuVisible ||
     receiptPreviewVisible;
+
+  const focusRenameInput = useCallback(() => {
+    const focus = () => renameInputRef.current?.focus();
+    InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(focus);
+      setTimeout(focus, 120);
+    });
+  }, []);
 
   useEffect(() => {
     navigation.setOptions({gestureEnabled: !isOverlayOpen});
@@ -603,6 +613,16 @@ const AccountDetailScreen = ({route, navigation}) => {
     renameModalVisible,
     modalSlideAnim,
   ]);
+
+  useEffect(() => {
+    if (!renameModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusRenameInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [renameModalVisible, focusRenameInput]);
 
   const closeOptionsMenu = (keepSelection = false) => {
     Animated.parallel([
@@ -1040,6 +1060,9 @@ const AccountDetailScreen = ({route, navigation}) => {
   const openRenameModal = () => {
     setNewAccountName(account.account_name || '');
     setRenameModalVisible(true);
+    setTimeout(() => {
+      renameInputRef.current?.focus();
+    }, 600);
   };
 
   const closeRenameModal = () => {
@@ -1502,6 +1525,7 @@ const AccountDetailScreen = ({route, navigation}) => {
 
     let added = 0;
     let withdrawals = 0;
+    const filtered = [];
 
     transactions.forEach(txn => {
       if (Number(txn.is_deleted) === 1) {
@@ -1517,11 +1541,13 @@ const AccountDetailScreen = ({route, navigation}) => {
         } else if (amount < 0) {
           withdrawals += Math.abs(amount);
         }
+        filtered.push(txn);
       }
     });
 
     setFilteredAdded(added);
     setFilteredWithdrawals(withdrawals);
+    setFilteredTransactions(filtered);
   };
 
   const calculateMonthYearData = (month, year) => {
@@ -1536,6 +1562,7 @@ const AccountDetailScreen = ({route, navigation}) => {
     );
     let added = 0;
     let withdrawals = 0;
+    const filtered = [];
 
     transactions.forEach(txn => {
       if (Number(txn.is_deleted) === 1) {
@@ -1551,11 +1578,13 @@ const AccountDetailScreen = ({route, navigation}) => {
         } else if (amount < 0) {
           withdrawals += Math.abs(amount);
         }
+        filtered.push(txn);
       }
     });
 
     setFilteredAdded(added);
     setFilteredWithdrawals(withdrawals);
+    setFilteredTransactions(filtered);
   };
 
   const updateFilteredData = () => {
@@ -1782,7 +1811,7 @@ const AccountDetailScreen = ({route, navigation}) => {
   };
 
   const renderTransactions = () => {
-    if (transactions.length === 0) {
+    if (filteredTransactions.length === 0) {
       return (
         <View style={styles.emptyHistory}>
           <Icon name="receipt-outline" size={48} color="#D1D5DB" />
@@ -1796,7 +1825,7 @@ const AccountDetailScreen = ({route, navigation}) => {
 
     return (
       <View style={styles.chatList}>
-        {transactions.map(txn => {
+        {filteredTransactions.map(txn => {
           const dateKey = new Date(txn.transaction_date).toDateString();
           const showDate = dateKey !== lastDateKey;
           lastDateKey = dateKey;
@@ -2207,7 +2236,7 @@ const AccountDetailScreen = ({route, navigation}) => {
               </Text>
               {isDeletedTransaction(selectedTransaction) && (
                 <Text style={styles.optionsSubtitle}>
-                  Deleted entry can’t be edited.
+                  Deleted entry canï¿½t be edited.
                 </Text>
               )}
             </View>
@@ -2681,56 +2710,16 @@ const AccountDetailScreen = ({route, navigation}) => {
         </Animated.View>
       </Modal>
 
-      <Modal
+      <RenameAccountModal
         visible={renameModalVisible}
-        transparent
-        animationType="none"
-        onRequestClose={closeRenameModal}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={closeRenameModal}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Rename Account</Text>
-            <TextInput
-              style={styles.modalTextInput}
-              placeholder="Account name"
-              value={newAccountName}
-              onChangeText={setNewAccountName}
-              editable={!loading}
-              autoFocus
-              showSoftInputOnFocus
-              ref={renameInputRef}
-            />
-            <TouchableOpacity
-              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
-              onPress={handleSaveAccountName}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalAddButtonText}>Save</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      </Modal>
+        value={newAccountName}
+        onChange={setNewAccountName}
+        onSave={handleSaveAccountName}
+        onClose={closeRenameModal}
+        loading={loading}
+        inputRef={renameInputRef}
+        styles={styles}
+      />
     </View>
   );
 };

@@ -5,14 +5,14 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  Animated,
-  Easing,
   Keyboard,
   BackHandler,
   InteractionManager,
   Platform,
   Pressable,
   FlatList,
+  KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import {CommonActions} from '@react-navigation/native';
 import {Picker} from '@react-native-picker/picker';
@@ -91,8 +91,6 @@ const AmountEntryScreen = ({route, navigation}) => {
   const lastDateIndexRef = useRef(-1);
   const lastHourIndexRef = useRef(-1);
   const lastMinuteIndexRef = useRef(-1);
-  const keyboardInsetAnim = useRef(new Animated.Value(0)).current;
-  const centerShiftAnim = useRef(new Animated.Value(0)).current;
 
   const isWithdrawMode = mode === 'withdraw';
   const isRequestMode = mode === 'request';
@@ -141,6 +139,7 @@ const AmountEntryScreen = ({route, navigation}) => {
     return () => clearTimeout(t1);
   }, []);
 
+
   useEffect(() => {
     if ((!isWithdrawMode && !isRequestMode) || !account?.id) {
       return;
@@ -183,52 +182,6 @@ const AmountEntryScreen = ({route, navigation}) => {
     loadTransferAccounts();
   }, [isWithdrawMode, isRequestMode, account?.id]);
 
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const onShow = event => {
-      const height = event?.endCoordinates?.height ?? 0;
-      Animated.parallel([
-        Animated.timing(keyboardInsetAnim, {
-          toValue: height,
-          duration: 240,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: false,
-        }),
-        Animated.timing(centerShiftAnim, {
-          toValue: -10,
-          duration: 240,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    };
-
-    const onHide = () => {
-      Animated.parallel([
-        Animated.timing(keyboardInsetAnim, {
-          toValue: 0,
-          duration: 200,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: false,
-        }),
-        Animated.timing(centerShiftAnim, {
-          toValue: 0,
-          duration: 200,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    };
-
-    const showSub = Keyboard.addListener(showEvent, onShow);
-    const hideSub = Keyboard.addListener(hideEvent, onHide);
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, [keyboardInsetAnim, centerShiftAnim]);
 
   const title = useMemo(() => {
     if (isWithdrawMode) {
@@ -743,8 +696,8 @@ const AmountEntryScreen = ({route, navigation}) => {
   )}`;
 
   const transferPopupTitleText = isRequestMode
-    ? 'Choose account to request from'
-    : 'Choose account to pay with';
+    ? 'Select account to request from'
+    : 'Select account to transfer from';
 
   const transferPopupCtaLabel = isRequestMode
     ? amount
@@ -761,13 +714,17 @@ const AmountEntryScreen = ({route, navigation}) => {
     : 'Transfer';
 
   return (
-    <Pressable style={styles.screen} onPress={Keyboard.dismiss} pointerEvents="box-none">
-      <Animated.View
-        style={[
-          styles.container,
-          {paddingBottom: keyboardInsetAnim},
-        ]}>
-        <View style={styles.header}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}>
+      <Pressable style={styles.screen} onPress={Keyboard.dismiss} pointerEvents="box-none">
+        <View style={styles.container}>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.header}>
           <TouchableOpacity
             style={styles.headerButton}
             onPress={() => navigation.goBack()}>
@@ -775,13 +732,9 @@ const AmountEntryScreen = ({route, navigation}) => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{title}</Text>
           <View style={styles.headerSpacer} />
-        </View>
+            </View>
 
-        <Animated.View
-          style={[
-            styles.centerArea,
-            {transform: [{translateY: centerShiftAnim}]},
-          ]}>
+            <View style={styles.centerArea}>
           <Pressable style={styles.tapZone} onPress={focusAmountInput}>
             <View style={styles.amountBlock}>
               <Text style={styles.currencySymbol}>{currencySymbol}</Text>
@@ -817,9 +770,9 @@ const AmountEntryScreen = ({route, navigation}) => {
               <Text style={styles.scheduleCtaText}>{scheduleCtaLabel}</Text>
             </TouchableOpacity>
           </View>
-        </Animated.View>
+            </View>
 
-        <View style={styles.bottomArea}>
+            <View style={styles.bottomArea}>
           {isWithdrawMode ? (
             <>
 
@@ -878,18 +831,19 @@ const AmountEntryScreen = ({route, navigation}) => {
               onPress={() => handleSubmit('add')}
             />
           )}
-        </View>
+            </View>
+          </ScrollView>
 
 
-        {transferPopupVisible && (
-          <Animated.View style={[styles.transferOverlay, {paddingBottom: keyboardInsetAnim}]}>
+          {transferPopupVisible && (
+          <View style={styles.transferOverlay}>
             <Pressable style={styles.transferBackdrop} onPress={closeTransferPopup} />
             <View style={styles.transferSheet}>
               <View style={styles.transferSheetHeader}>
                 <TouchableOpacity
                   onPress={closeTransferPopup}
                   style={styles.transferSheetClose}>
-                  <Icon name="chevron-back" size={18} color={colors.text.primary} />
+                  <Icon name="arrow-back" size={22} color={colors.text.primary} />
                 </TouchableOpacity>
                 <Text style={styles.transferSheetTitle}>{transferPopupTitleText}</Text>
               </View>
@@ -995,10 +949,10 @@ const AmountEntryScreen = ({route, navigation}) => {
                 </Text>
               </TouchableOpacity>
             </View>
-          </Animated.View>
+          </View>
         )}
-        {schedulePopupVisible && (
-          <Animated.View style={[styles.scheduleOverlay, {paddingBottom: keyboardInsetAnim}]}>
+          {schedulePopupVisible && (
+          <View style={styles.scheduleOverlay}>
             <Pressable style={styles.scheduleBackdrop} onPress={closeSchedulePopup} />
             <View style={styles.schedulePanel}>
               <View style={styles.scheduleHeader}>
@@ -1161,10 +1115,11 @@ const AmountEntryScreen = ({route, navigation}) => {
                 onPress={handleScheduleDone}
               />
             </View>
-          </Animated.View>
+          </View>
         )}
-      </Animated.View>
-    </Pressable>
+        </View>
+      </Pressable>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -1175,6 +1130,10 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+  },
+  content: {
+    flexGrow: 1,
+    paddingBottom: spacing.lg,
   },
   header: {
     flexDirection: 'row',
@@ -1200,7 +1159,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl * 3.8,
+    paddingTop: spacing.xl * 1.6,
   },
   tapZone: {
     alignItems: 'center',
@@ -1246,6 +1205,7 @@ const styles = StyleSheet.create({
   bottomArea: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
+    marginTop: 'auto',
   },
   panel: {
     backgroundColor: colors.white,
@@ -1333,6 +1293,9 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     elevation: 9999,
     backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  transferBackdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   scheduleBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -1563,6 +1526,14 @@ const styles = StyleSheet.create({
   },
   transferListRowSelected: {
     backgroundColor: '#EFF6FF',
+  },
+  transferSelectedTick: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   transferAddBank: {
     alignSelf: 'flex-start',

@@ -39,7 +39,6 @@ const RenameAccountModal = ({
             value={value}
             onChangeText={onChange}
             editable={!loading}
-            autoFocus
             showSoftInputOnFocus
             ref={inputRef}
           />

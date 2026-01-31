@@ -30,6 +30,7 @@ import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import BottomSheet from '../components/BottomSheet';
 import AmountEntryView from '../components/AmountEntryView';
 import AmountActionButton from '../components/AmountActionButton';
+import RenameAccountModal from '../components/RenameAccountModal';
 import {useUniversalToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import {
@@ -249,6 +250,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const [availableYears, setAvailableYears] = useState([]);
   const [filteredAdded, setFilteredAdded] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
+  const [filteredTransactions, setFilteredTransactions] = useState([]);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const {showUniversalToast} = useUniversalToast();
   const currencySymbol = useCurrencySymbol();
@@ -566,12 +568,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
   const focusRenameInput = useCallback(() => {
     const focus = () => renameInputRef.current?.focus();
-    Keyboard.dismiss();
-    focus();
-    requestAnimationFrame(focus);
-    InteractionManager.runAfterInteractions(focus);
-    setTimeout(focus, 300);
-    setTimeout(focus, 600);
+    InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(focus);
+      setTimeout(focus, 120);
+    });
   }, []);
 
   useEffect(() => {
@@ -1190,6 +1190,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const openRenameModal = () => {
     setNewAccountName(account.account_name || '');
     setRenameModalVisible(true);
+    setTimeout(() => {
+      renameInputRef.current?.focus();
+    }, 600);
   };
 
   const closeRenameModal = () => {
@@ -1860,6 +1863,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
     let added = 0;
     let withdrawals = 0;
+    const filtered = [];
 
     transactions.forEach(txn => {
       if (Number(txn.is_deleted) === 1) {
@@ -1875,11 +1879,13 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         } else if (amount < 0) {
           withdrawals += Math.abs(amount);
         }
+        filtered.push(txn);
       }
     });
 
     setFilteredAdded(added);
     setFilteredWithdrawals(withdrawals);
+    setFilteredTransactions(filtered);
   };
 
   const calculateMonthYearData = (month, year) => {
@@ -1894,6 +1900,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     );
     let added = 0;
     let withdrawals = 0;
+    const filtered = [];
 
     transactions.forEach(txn => {
       if (Number(txn.is_deleted) === 1) {
@@ -1909,11 +1916,13 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         } else if (amount < 0) {
           withdrawals += Math.abs(amount);
         }
+        filtered.push(txn);
       }
     });
 
     setFilteredAdded(added);
     setFilteredWithdrawals(withdrawals);
+    setFilteredTransactions(filtered);
   };
 
   const updateFilteredData = () => {
@@ -2097,6 +2106,14 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     updateFilteredData();
   }, [quickPeriod, selectedMonth, selectedYear, transactions, monthStartDay]);
 
+  useEffect(() => {
+    if (renameModalVisible) {
+      setTimeout(() => {
+        renameInputRef.current?.focus();
+      }, 400);
+    }
+  }, [renameModalVisible]);
+
   const normalizeMonthStartDay = value => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
@@ -2140,7 +2157,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   };
 
   const renderTransactions = () => {
-    if (transactions.length === 0) {
+    if (filteredTransactions.length === 0) {
       return (
         <View style={styles.emptyHistory}>
           <Icon name="receipt-outline" size={48} color="#D1D5DB" />
@@ -2154,7 +2171,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
 
     return (
       <View style={styles.chatList}>
-        {transactions.map(txn => {
+        {filteredTransactions.map(txn => {
           const dateKey = new Date(txn.transaction_date).toDateString();
           const showDate = dateKey !== lastDateKey;
           lastDateKey = dateKey;
@@ -3547,56 +3564,16 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         </View>
       </Modal>
 
-      <Modal
+      <RenameAccountModal
         visible={renameModalVisible}
-        transparent
-        animationType="none"
-        onRequestClose={closeRenameModal}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={closeRenameModal}
-          />
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [
-                  {
-                    translateY: modalSlideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [260, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Rename Account</Text>
-            <TextInput
-              style={styles.modalTextInput}
-              placeholder="Account name"
-              value={newAccountName}
-              onChangeText={setNewAccountName}
-              editable={!loading}
-              autoFocus
-              showSoftInputOnFocus
-              ref={renameInputRef}
-            />
-            <TouchableOpacity
-              style={[styles.modalAddButton, loading && styles.buttonDisabled]}
-              onPress={handleSaveAccountName}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalAddButtonText}>Save</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      </Modal>
+        value={newAccountName}
+        onChange={setNewAccountName}
+        onSave={handleSaveAccountName}
+        onClose={closeRenameModal}
+        loading={loading}
+        inputRef={renameInputRef}
+        styles={styles}
+      />
 
       <BottomSheet
         visible={isBottomSheetVisible}

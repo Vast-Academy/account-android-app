@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   UIManager,
   Animated,
   TextInput,
+  Keyboard,
+  InteractionManager,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import FaArrowCircleDown from '../components/icons/FaArrowCircleDown';
@@ -19,6 +21,7 @@ import BsCashCoin from '../components/icons/BsCashCoin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import FaArrowCircleUp from '../components/icons/FaArrowCircleUp';
 import BottomSheet from '../components/BottomSheet';
+import RenameAccountModal from '../components/RenameAccountModal';
 import {
   initAccountsDatabase,
   getAllAccounts,
@@ -104,6 +107,7 @@ const DashboardScreen = ({navigation}) => {
   const [selectedAccount, setSelectedAccount] = useState(null);
   const selectedAccountRef = useRef(null);
   const deletePressGuardRef = useRef(false);
+  const renameInputRef = useRef(null);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [renameTargetAccount, setRenameTargetAccount] = useState(null);
   const [newAccountName, setNewAccountName] = useState('');
@@ -117,6 +121,26 @@ const DashboardScreen = ({navigation}) => {
 
   const fabRef = useRef(null);
   const fabAnim = useRef(new Animated.Value(0)).current;
+
+  const focusRenameInput = useCallback(() => {
+    const focus = () => renameInputRef.current?.focus();
+    InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(focus);
+      setTimeout(focus, 120);
+    });
+  }, []);
+
+  const renameModalStyles = {
+    ...styles,
+    modalOverlay: styles.renameModalOverlay,
+    modalBackdrop: styles.renameModalBackdrop,
+    modalSheet: styles.renameModalSheet,
+    modalHandle: styles.renameModalHandle,
+    modalTitle: styles.renameModalTitle,
+    modalTextInput: styles.renameModalTextInput,
+    modalAddButton: styles.renameModalAddButton,
+    modalAddButtonText: styles.renameModalAddButtonText,
+  };
 
   const netBalance = React.useMemo(() => {
     return accounts.reduce((total, account) => {
@@ -142,7 +166,7 @@ const DashboardScreen = ({navigation}) => {
       duration: 200,
       useNativeDriver: true,
     }).start();
-    navigation.navigate('AddAccount', {initialType: type});
+    navigation.navigate('AddAccount', {accountType: type});
   };
 
   const selectedAccountIndex = React.useMemo(() => {
@@ -236,6 +260,16 @@ const DashboardScreen = ({navigation}) => {
   useEffect(() => {
     generateAvailableYears();
   }, [accounts]);
+
+  useEffect(() => {
+    if (!renameModalVisible) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      focusRenameInput();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [renameModalVisible, focusRenameInput]);
 
   const hasBasicDetails = userData => {
     const name = String(userData?.displayName || userData?.name || '').trim();
@@ -881,6 +915,9 @@ const DashboardScreen = ({navigation}) => {
     setNewAccountName(account?.account_name || ''); // Ensure newAccountName is always a string
     setRenameModalVisible(true);
     closeContextMenu();
+    setTimeout(() => {
+      renameInputRef.current?.focus();
+    }, 600);
   };
 
   const closeRenameModal = () => {
@@ -991,19 +1028,13 @@ const DashboardScreen = ({navigation}) => {
             <View style={styles.accountMetricsRow}>
               <View style={styles.accountMetricThird}>
                 <View style={styles.accountMetricLabelRow}>
-                  <View
-                    style={[
-                      styles.accountMetricIcon,
-                      {backgroundColor: colors.white},
-                    ]}>
-                    <FaArrowCircleUp size={24} color={colors.success} />
-                  </View>
                   <Text style={styles.accountMetricLabel}>Earning</Text>
                 </View>
                 <Text
                   style={[
                     styles.accountMetricValue,
                     styles.accountMetricValueIndented,
+                    styles.accountMetricPositive,
                   ]}>
                   {formatCurrencyRupee(filteredEarning)}
                 </Text>
@@ -1011,13 +1042,6 @@ const DashboardScreen = ({navigation}) => {
               <View style={styles.accountMetricDivider} />
               <View style={styles.accountMetricThird}>
                 <View style={styles.accountMetricLabelRow}>
-                  <View
-                    style={[
-                      styles.accountMetricIcon,
-                      {backgroundColor: colors.white},
-                    ]}>
-                    <FaArrowCircleDown size={24} color={colors.error} />
-                  </View>
                   <Text style={styles.accountMetricLabel}>Expenses</Text>
                 </View>
                 <Text
@@ -1032,13 +1056,6 @@ const DashboardScreen = ({navigation}) => {
               <View style={styles.accountMetricDivider} />
               <View style={styles.accountMetricThird}>
                 <View style={styles.accountMetricLabelRow}>
-                  <View
-                    style={[
-                      styles.accountMetricIcon,
-                      {backgroundColor: colors.white},
-                    ]}>
-                    <Icon name="wallet" size={24} color="#2196F3" />
-                  </View>
                   <Text style={styles.accountMetricLabel}>Net Balance</Text>
                 </View>
                 <Text
@@ -1482,8 +1499,10 @@ const DashboardScreen = ({navigation}) => {
               style={styles.contextMenuItem}
               hitSlop={{top: 6, bottom: 6, left: 8, right: 8}}
               onPress={() => {
-                Alert.alert('Personalization', 'Personalization options not yet implemented.');
                 closeContextMenu();
+                if (selectedAccount?.id) {
+                  navigation.navigate('PersonalizeAccount', {accountId: selectedAccount.id});
+                }
               }}>
               <Icon name="color-palette-outline" size={22} color={colors.text.primary} />
               <Text style={styles.contextMenuItemText}>Personalization</Text>
@@ -1500,36 +1519,16 @@ const DashboardScreen = ({navigation}) => {
       </Modal>
 
       {/* Rename Account Modal */}
-      <Modal
+      <RenameAccountModal
         visible={renameModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeRenameModal}>
-        <View style={styles.renameModalOverlay}>
-          <View style={styles.renameModalContainer}>
-            <Text style={styles.renameModalTitle}>Rename Account</Text>
-            <TextInput
-              style={styles.renameModalInput}
-              value={newAccountName}
-              onChangeText={setNewAccountName}
-              placeholder="Enter new account name"
-              autoFocus
-            />
-            <View style={styles.renameModalButtons}>
-              <TouchableOpacity
-                style={[styles.renameModalButton, styles.renameModalCancelButton]}
-                onPress={closeRenameModal}>
-                <Text style={styles.renameModalCancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.renameModalButton, styles.renameModalSaveButton]}
-                onPress={handleSaveAccountName}>
-                <Text style={styles.renameModalButtonText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        value={newAccountName}
+        onChange={setNewAccountName}
+        onSave={handleSaveAccountName}
+        onClose={closeRenameModal}
+        loading={false}
+        inputRef={renameInputRef}
+        styles={renameModalStyles}
+      />
 
       {/* Setup Completion Popup */}
       <BottomSheet visible={showSetupPopup} onClose={handleRemindLater}>
@@ -1663,9 +1662,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  accountMetricValueIndented: {
-    textAlign: 'center',
   },
   accountMetricIconNegative: {
     backgroundColor: colors.error,
@@ -2031,57 +2027,61 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     fontWeight: fontWeight.medium,
   },
-  // Rename Modal
+  // Rename Modal (Dashboard)
   renameModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
-  renameModalContainer: {
-    width: '90%',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: spacing.lg,
-    elevation: 10,
+  renameModalBackdrop: {
+    flex: 1,
+  },
+  renameModalSheet: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
+    position: 'relative',
+  },
+  renameModalHandle: {
+    alignSelf: 'center',
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D1D5DB',
+    marginBottom: spacing.sm,
   },
   renameModalTitle: {
     fontSize: fontSize.large,
-    fontWeight: 'bold',
-    marginBottom: spacing.md,
-    textAlign: 'center',
+    fontWeight: fontWeight.semibold,
+    color: colors.text.primary,
+    marginBottom: spacing.sm,
   },
-  renameModalInput: {
+  renameModalTextInput: {
+    backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
-    padding: spacing.sm,
-    marginBottom: spacing.lg,
-    fontSize: fontSize.regular,
-  },
-  renameModalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.md,
-  },
-  renameModalButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  renameModalSaveButton: {
-    backgroundColor: colors.primary,
-  },
-  renameModalButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  renameModalCancelButton: {
-    backgroundColor: colors.border,
-  },
-  renameModalCancelButtonText: {
+    borderRadius: 12,
+    padding: 12,
+    fontSize: fontSize.medium,
     color: colors.text.primary,
-    fontWeight: 'bold',
+    marginBottom: spacing.md,
+  },
+  renameModalAddButton: {
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  renameModalAddButtonText: {
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.bold,
+    color: colors.white,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   setupSheetContent: {
     paddingHorizontal: spacing.lg,
@@ -2129,4 +2129,3 @@ const styles = StyleSheet.create({
 });
 
 export default DashboardScreen;
-

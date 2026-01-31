@@ -258,6 +258,7 @@ export const initAccountsDatabase = () => {
         icon_color TEXT,
         balance REAL DEFAULT 0,
         is_primary INTEGER DEFAULT 0,
+        auto_fund_primary INTEGER DEFAULT 0,
         sort_index INTEGER,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -282,6 +283,11 @@ export const initAccountsDatabase = () => {
     }
     try {
       db.execute('ALTER TABLE accounts ADD COLUMN sort_index INTEGER');
+    } catch (e) {
+      // Column already exists, ignore
+    }
+    try {
+      db.execute('ALTER TABLE accounts ADD COLUMN auto_fund_primary INTEGER DEFAULT 0');
     } catch (e) {
       // Column already exists, ignore
     }
@@ -545,6 +551,24 @@ export const clearAllAccountsData = async () => {
   }
 };
 
+
+
+// Update account personalization
+export const updateAccountPersonalization = async (id, icon, iconColor, autoFundPrimary = 0) => {
+  try {
+    const db = getDB();
+    const timestamp = Date.now();
+    db.execute(
+      'UPDATE accounts SET icon = ?, icon_color = ?, auto_fund_primary = ?, updated_at = ? WHERE id = ?',
+      [icon || null, iconColor || null, autoFundPrimary ? 1 : 0, timestamp, id]
+    );
+    queueBackupFromStorage();
+    return {success: true};
+  } catch (error) {
+    console.error('Failed to update account personalization:', error);
+    throw error;
+  }
+};
 
 // Update account balance
 export const updateAccountBalance = async (id, newBalance) => {

@@ -1,62 +1,22 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   ScrollView,
   SafeAreaView,
   Modal,
   FlatList,
   Animated,
+  Switch,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import BsCashCoin from '../components/icons/BsCashCoin';
-import {
-  createAccount,
-  isAccountNameExists,
-} from '../services/accountsDatabase';
-import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
-
-// Account Tags
-const EARNING_TAGS = [
-  'Salary',
-  'Business',
-  'Investment',
-  'Rental Income',
-  'Bonus',
-  'Freelance',
-  'Pocket Money',
-  'Savings Interest',
-  'Gift',
-  'Side Hustle',
-  'Commission',
-  'Dividend',
-  'Pension',
-  'Allowance',
-  'Other',
-];
-
-const EXPENSES_TAGS = [
-  'Groceries',
-  'Transport',
-  'Shopping',
-  'Bills',
-  'Dining Out',
-  'Healthcare',
-  'Entertainment',
-  'Education',
-  'Rent',
-  'Insurance',
-  'Personal Care',
-  'Fitness',
-  'Travel',
-  'Utilities',
-  'Other',
-];
+import {colors, spacing, fontSize} from '../utils/theme';
+import {getAllAccounts, updateAccountPersonalization} from '../services/accountsDatabase';
+import {useToast} from '../hooks/useToast';
 
 // 20 Icons
 const ACCOUNT_ICONS = [
@@ -82,7 +42,7 @@ const ACCOUNT_ICONS = [
   {id: 'star', name: 'star-outline', label: 'Favorite'},
 ];
 
-// 20 Colors
+// Colors (match Add Account list)
 const ACCOUNT_COLORS = [
   {name: 'Blue', value: '#3B82F6'},
   {name: 'Purple', value: '#8B5CF6'},
@@ -111,25 +71,21 @@ const renderAccountIcon = (iconName, size, color) => {
   return <Icon name={iconName} size={size} color={color} />;
 };
 
-const AddAccountScreen = ({navigation, route}) => {
-  const accountType = route?.params?.accountType || 'earning';
-  const tags = accountType === 'earning' ? EARNING_TAGS : EXPENSES_TAGS;
+const PersonalizeAccountScreen = ({navigation, route}) => {
+  const {showToast} = useToast();
+  const accountId = route?.params?.accountId ?? route?.params?.account?.id ?? null;
 
-  const [selectedTag, setSelectedTag] = React.useState(null);
-  const [customName, setCustomName] = React.useState('');
+  const [account, setAccount] = React.useState(null);
   const [selectedIcon, setSelectedIcon] = React.useState(ACCOUNT_ICONS[0]);
   const [selectedColor, setSelectedColor] = React.useState(ACCOUNT_COLORS[0].value);
-  const [loading, setLoading] = React.useState(false);
-
-  const [tagDropdownVisible, setTagDropdownVisible] = React.useState(false);
+  const [autoFundPrimary, setAutoFundPrimary] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
   const [iconDropdownVisible, setIconDropdownVisible] = React.useState(false);
 
   // Animation values
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
   const scaleAnim = React.useRef(new Animated.Value(0.9)).current;
   const modalSlideAnim = React.useRef(new Animated.Value(300)).current;
-
-  const isOtherSelected = selectedTag === 'Other';
 
   // Fade in animation on mount
   React.useEffect(() => {
@@ -150,7 +106,7 @@ const AddAccountScreen = ({navigation, route}) => {
 
   // Modal slide animation
   React.useEffect(() => {
-    if (tagDropdownVisible || iconDropdownVisible) {
+    if (iconDropdownVisible) {
       Animated.spring(modalSlideAnim, {
         toValue: 0,
         tension: 65,
@@ -164,69 +120,69 @@ const AddAccountScreen = ({navigation, route}) => {
         useNativeDriver: true,
       }).start();
     }
-  }, [tagDropdownVisible, iconDropdownVisible]);
+  }, [iconDropdownVisible, modalSlideAnim]);
 
-  const handleTagSelect = tag => {
-    setSelectedTag(tag);
-    setTagDropdownVisible(false);
-    if (tag !== 'Other') {
-      setCustomName('');
+  const loadAccount = React.useCallback(() => {
+    if (!accountId) {
+      return;
     }
-  };
+    const accounts = getAllAccounts();
+    const target = accounts.find(item => String(item.id) === String(accountId));
+    if (!target) {
+      return;
+    }
+    setAccount(target);
+    const iconMatch = ACCOUNT_ICONS.find(icon => icon.name === target.icon);
+    if (iconMatch) {
+      setSelectedIcon(iconMatch);
+    } else if (target.icon) {
+      setSelectedIcon({id: 'custom', name: target.icon, label: 'Custom'});
+    }
+    if (target.icon_color) {
+      setSelectedColor(target.icon_color);
+    }
+    setAutoFundPrimary(Number(target.auto_fund_primary) === 1);
+  }, [accountId]);
+
+  React.useEffect(() => {
+    loadAccount();
+  }, [loadAccount]);
 
   const handleIconSelect = icon => {
     setSelectedIcon(icon);
     setIconDropdownVisible(false);
   };
 
-  const getAccountName = () => {
-    if (isOtherSelected && customName.trim()) {
-      return customName.trim();
-    }
-    if (selectedTag) {
-      return selectedTag;
-    }
-    return '';
-  };
-
-  const isValid = () => {
-    if (isOtherSelected) {
-      return customName.trim().length > 0;
-    }
-    return selectedTag !== null;
-  };
-
-  const handleCreate = async () => {
-    const accountName = getAccountName();
-
-    if (!accountName) {
-      Alert.alert('Error', 'Please select or enter an account name.');
+  const handleSave = async () => {
+    if (!account?.id) {
       return;
     }
-
-    if (isAccountNameExists(accountName)) {
-      Alert.alert('Error', 'An account with this name already exists.');
-      return;
-    }
-
-    setLoading(true);
+    setSaving(true);
     try {
-      await createAccount(accountName, accountType, selectedIcon.name, selectedColor);
+      await updateAccountPersonalization(
+        account.id,
+        selectedIcon.name,
+        selectedColor,
+        autoFundPrimary
+      );
+      showToast('Account updated', 'success');
       navigation.goBack();
     } catch (error) {
-      Alert.alert('Error', 'Failed to create account. Please try again.');
+      showToast('Failed to update account', 'error');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const headerTitle = accountType === 'earning'
-    ? 'Create Earning Account'
-    : 'Create Expenses Account';
+  const createdLabel = account?.created_at
+    ? new Date(account.created_at).toLocaleString()
+    : '—';
+
+  const headerTitle = 'Personalize Account';
 
   return (
     <SafeAreaView style={styles.screen}>
-      {/* Header with gradient shadow */}
+      {/* Header */}
       <View style={[styles.header, {borderBottomWidth: 1, borderBottomColor: selectedColor + '26'}]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -241,10 +197,7 @@ const AddAccountScreen = ({navigation, route}) => {
       <Animated.View
         style={[
           styles.animatedContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{scale: scaleAnim}],
-          },
+          {opacity: fadeAnim, transform: [{scale: scaleAnim}]},
         ]}>
         <ScrollView
           style={styles.scrollView}
@@ -252,166 +205,111 @@ const AddAccountScreen = ({navigation, route}) => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
 
-        {/* Select Account Tag Dropdown */}
-        <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
-          <Text style={styles.fieldLabel}>Account Name</Text>
-          <TouchableOpacity
-            style={[styles.dropdownButton, {borderColor: selectedColor + '55'}]}
-            onPress={() => setTagDropdownVisible(true)}
-            activeOpacity={0.7}>
-            <Text style={styles.dropdownButtonText}>
-              {selectedTag || 'Select Account Tag'}
-            </Text>
-            <Icon name="chevron-down" size={20} color={colors.text.secondary} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Custom Name Input (conditional) */}
-        {isOtherSelected && (
+          {/* Account Header */}
           <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
-            <Text style={styles.fieldLabel}>Custom Name</Text>
-            <TextInput
-              style={[styles.textInput, {borderColor: selectedColor + '55'}]}
-              placeholder="Enter account name..."
-              placeholderTextColor={colors.text.secondary}
-              value={customName}
-              onChangeText={setCustomName}
-              autoCapitalize="words"
-              maxLength={30}
-            />
-          </View>
-        )}
-
-        {/* Select Icon Dropdown */}
-        <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
-          <Text style={styles.fieldLabel}>Icon</Text>
-          <TouchableOpacity
-            style={[styles.dropdownButton, {borderColor: selectedColor + '55'}]}
-            onPress={() => setIconDropdownVisible(true)}
-            activeOpacity={0.7}>
-            <View style={styles.dropdownIconPreview}>
+            <Text style={styles.fieldLabel}>Account</Text>
+            <View style={styles.accountHeaderRow}>
               <View style={[styles.iconPreviewCircle, {backgroundColor: selectedColor + '15'}]}>
                 {renderAccountIcon(selectedIcon.name, 20, selectedColor)}
               </View>
-              <Text style={styles.dropdownButtonText}>{selectedIcon.label}</Text>
+              <View>
+                <Text style={styles.accountHeaderName}>{account?.account_name || 'Account'}</Text>
+                <Text style={styles.accountHeaderType}>
+                  {account?.account_type ? `${account.account_type} account` : 'Account'}
+                </Text>
+              </View>
             </View>
-            <Icon name="chevron-down" size={20} color={colors.text.secondary} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Color Selection */}
-        <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
-          <Text style={styles.fieldLabel}>Color Theme</Text>
-          <View style={styles.colorGrid}>
-            {ACCOUNT_COLORS.map(colorItem => {
-              const isSelected = selectedColor === colorItem.value;
-              return (
-                <TouchableOpacity
-                  key={colorItem.name}
-                  style={[
-                    styles.colorDot,
-                    {backgroundColor: colorItem.value},
-                    isSelected && styles.colorDotSelected,
-                  ]}
-                  onPress={() => setSelectedColor(colorItem.value)}
-                  activeOpacity={0.7}>
-                  {isSelected && (
-                    <View style={styles.colorCheckContainer}>
-                      <Icon name="checkmark-circle" size={20} color="#FFFFFF" />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
           </View>
-        </View>
-      </ScrollView>
+
+          {/* Select Icon Dropdown */}
+          <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
+            <Text style={styles.fieldLabel}>Icon</Text>
+            <TouchableOpacity
+              style={[styles.dropdownButton, {borderColor: selectedColor + '55'}]}
+              onPress={() => setIconDropdownVisible(true)}
+              activeOpacity={0.7}>
+              <View style={styles.dropdownIconPreview}>
+                <View style={[styles.iconPreviewCircle, {backgroundColor: selectedColor + '15'}]}>
+                  {renderAccountIcon(selectedIcon.name, 20, selectedColor)}
+                </View>
+                <Text style={styles.dropdownButtonText}>{selectedIcon.label}</Text>
+              </View>
+              <Icon name="chevron-down" size={20} color={colors.text.secondary} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Color Selection */}
+          <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
+            <Text style={styles.fieldLabel}>Color Theme</Text>
+            <View style={styles.colorGrid}>
+              {ACCOUNT_COLORS.map(colorItem => {
+                const isSelected = selectedColor === colorItem.value;
+                return (
+                  <TouchableOpacity
+                    key={colorItem.name}
+                    style={[
+                      styles.colorDot,
+                      {backgroundColor: colorItem.value},
+                      isSelected && styles.colorDotSelected,
+                    ]}
+                    onPress={() => setSelectedColor(colorItem.value)}
+                    activeOpacity={0.7}>
+                    {isSelected && (
+                      <View style={styles.colorCheckContainer}>
+                        <Icon name="checkmark-circle" size={20} color="#FFFFFF" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Auto-fund */}
+          <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
+            <Text style={styles.fieldLabel}>Auto-fund from Primary Earning</Text>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleText}>Automatic top-up for this account</Text>
+              <Switch
+                value={autoFundPrimary}
+                onValueChange={setAutoFundPrimary}
+                trackColor={{false: '#E2E8F0', true: selectedColor}}
+                thumbColor={colors.white}
+              />
+            </View>
+          </View>
+
+          {/* Created */}
+          <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
+            <Text style={styles.fieldLabel}>Created</Text>
+            <Text style={styles.createdValue}>{createdLabel}</Text>
+          </View>
+        </ScrollView>
       </Animated.View>
 
-      {/* Create Button */}
+      {/* Save Button */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[
             styles.createButton,
             {backgroundColor: selectedColor},
-            !isValid() && styles.createButtonDisabled,
+            saving && styles.createButtonDisabled,
             styles.createButtonShadow,
           ]}
-          onPress={handleCreate}
-          disabled={!isValid() || loading}
+          onPress={handleSave}
+          disabled={saving}
           activeOpacity={0.85}>
           <View style={styles.buttonGradientOverlay} />
-          {loading ? (
+          {saving ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <View style={styles.buttonContent}>
-              <Icon name="add-circle-outline" size={22} color="#FFFFFF" />
-              <Text style={styles.createButtonText}>Create Account</Text>
+              <Icon name="save-outline" size={22} color="#FFFFFF" />
+              <Text style={styles.createButtonText}>Save</Text>
             </View>
           )}
         </TouchableOpacity>
       </View>
-
-      {/* Tag Dropdown Modal */}
-      <Modal
-        visible={tagDropdownVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setTagDropdownVisible(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setTagDropdownVisible(false)}>
-          <Animated.View
-            style={[
-              styles.modalContent,
-              {
-                transform: [{translateY: tagDropdownVisible ? modalSlideAnim : 300}],
-              },
-            ]}>
-            <View style={styles.modalDragIndicator} />
-            <View style={styles.modalHeader}>
-              <View style={styles.modalTitleContainer}>
-                <Icon name="pricetag-outline" size={20} color={selectedColor} />
-                <Text style={styles.modalTitle}>Select Account Tag</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setTagDropdownVisible(false)}
-                style={styles.modalCloseButton}
-                activeOpacity={0.7}>
-                <Icon name="close-circle" size={24} color="#94A3B8" />
-              </TouchableOpacity>
-            </View>
-            <FlatList
-              data={tags}
-              keyExtractor={(item, index) => index.toString()}
-              showsVerticalScrollIndicator={false}
-              renderItem={({item}) => {
-                const isSelected = selectedTag === item;
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.modalItem,
-                      isSelected && [styles.modalItemSelected, {borderLeftColor: selectedColor}],
-                    ]}
-                    onPress={() => handleTagSelect(item)}
-                    activeOpacity={0.7}>
-                    <View style={styles.modalItemContent}>
-                      {isSelected && (
-                        <View style={[styles.modalItemDot, {backgroundColor: selectedColor}]} />
-                      )}
-                      <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>{item}</Text>
-                    </View>
-                    {isSelected && (
-                      <Icon name="checkmark-circle" size={22} color={selectedColor} />
-                    )}
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          </Animated.View>
-        </TouchableOpacity>
-      </Modal>
 
       {/* Icon Dropdown Modal */}
       <Modal
@@ -505,7 +403,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0F172A',
     letterSpacing: -0.3,
   },
   headerSpacer: {
@@ -540,6 +437,22 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  accountHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  accountHeaderName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  accountHeaderType: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 4,
+    textTransform: 'capitalize',
+  },
   dropdownButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -572,22 +485,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  textInput: {
-    height: 48,
-    paddingHorizontal: 14,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0F172A',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
   },
   colorGrid: {
     flexDirection: 'row',
@@ -622,6 +519,23 @@ const styles = StyleSheet.create({
   },
   colorCheckContainer: {
     position: 'absolute',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  toggleText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  createdValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
   },
   buttonContainer: {
     padding: 16,
@@ -718,40 +632,6 @@ const styles = StyleSheet.create({
   modalCloseButton: {
     padding: 2,
   },
-  modalItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    borderLeftWidth: 3,
-    borderLeftColor: 'transparent',
-  },
-  modalItemSelected: {
-    backgroundColor: '#F8FAFC',
-    borderLeftWidth: 3,
-  },
-  modalItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  modalItemDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  modalItemText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#475569',
-  },
-  modalItemTextSelected: {
-    fontWeight: '700',
-    color: '#0F172A',
-  },
   iconGridContainer: {
     padding: 12,
   },
@@ -796,4 +676,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AddAccountScreen;
+export default PersonalizeAccountScreen;
