@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   ScrollView,
   SafeAreaView,
   Modal,
@@ -79,13 +78,16 @@ const PersonalizeAccountScreen = ({navigation, route}) => {
   const [selectedIcon, setSelectedIcon] = React.useState(ACCOUNT_ICONS[0]);
   const [selectedColor, setSelectedColor] = React.useState(ACCOUNT_COLORS[0].value);
   const [autoFundPrimary, setAutoFundPrimary] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
   const [iconDropdownVisible, setIconDropdownVisible] = React.useState(false);
 
   // Animation values
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
   const scaleAnim = React.useRef(new Animated.Value(0.9)).current;
   const modalSlideAnim = React.useRef(new Animated.Value(300)).current;
+
+  const saveTimeoutRef = React.useRef(null);
+  const lastSavedRef = React.useRef({icon: null, color: null, auto: null});
+  const isInitializedRef = React.useRef(false);
 
   // Fade in animation on mount
   React.useEffect(() => {
@@ -131,48 +133,116 @@ const PersonalizeAccountScreen = ({navigation, route}) => {
     if (!target) {
       return;
     }
+    isInitializedRef.current = false;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
     setAccount(target);
     const iconMatch = ACCOUNT_ICONS.find(icon => icon.name === target.icon);
     if (iconMatch) {
       setSelectedIcon(iconMatch);
     } else if (target.icon) {
       setSelectedIcon({id: 'custom', name: target.icon, label: 'Custom'});
+    } else {
+      setSelectedIcon(ACCOUNT_ICONS[0]);
     }
-    if (target.icon_color) {
-      setSelectedColor(target.icon_color);
-    }
-    setAutoFundPrimary(Number(target.auto_fund_primary) === 1);
+    const resolvedColor = target.icon_color || ACCOUNT_COLORS[0].value;
+    setSelectedColor(resolvedColor);
+    const resolvedAuto = Number(target.auto_fund_primary) === 1;
+    setAutoFundPrimary(resolvedAuto);
+    const resolvedIconName = iconMatch ? iconMatch.name : (target.icon || ACCOUNT_ICONS[0].name);
+    lastSavedRef.current = {
+      icon: resolvedIconName,
+      color: resolvedColor,
+      auto: resolvedAuto ? 1 : 0,
+    };
+    isInitializedRef.current = true;
   }, [accountId]);
 
   React.useEffect(() => {
     loadAccount();
   }, [loadAccount]);
 
+  const handleAutoFundToggle = async value => {
+    setAutoFundPrimary(value);
+    if (!account?.id) {
+      return;
+    }
+    try {
+      await updateAccountPersonalization(
+        account.id,
+        selectedIcon?.name ?? '',
+        selectedColor ?? '',
+        value
+      );
+      setAccount(prev =>
+        prev
+          ? {
+              ...prev,
+              auto_fund_primary: value ? 1 : 0,
+              updated_at: Date.now(),
+            }
+          : prev
+      );
+      lastSavedRef.current = {
+        icon: selectedIcon?.name ?? '',
+        color: selectedColor ?? '',
+        auto: value ? 1 : 0,
+      };
+      showToast(value ? 'Auto-fund enabled.' : 'Auto-fund disabled.', 'success');
+    } catch (error) {
+      showToast('Failed to update account', 'error');
+    }
+  };
+
   const handleIconSelect = icon => {
     setSelectedIcon(icon);
     setIconDropdownVisible(false);
   };
 
-  const handleSave = async () => {
-    if (!account?.id) {
+  React.useEffect(() => {
+    if (!account?.id || !isInitializedRef.current) {
       return;
     }
-    setSaving(true);
-    try {
-      await updateAccountPersonalization(
-        account.id,
-        selectedIcon.name,
-        selectedColor,
-        autoFundPrimary
-      );
-      showToast('Account updated', 'success');
-      navigation.goBack();
-    } catch (error) {
-      showToast('Failed to update account', 'error');
-    } finally {
-      setSaving(false);
+    const nextState = {
+      icon: selectedIcon?.name ?? '',
+      color: selectedColor ?? '',
+      auto: Number(account?.auto_fund_primary) === 1 ? 1 : 0,
+    };
+    const lastState = lastSavedRef.current;
+    if (
+      lastState.icon === nextState.icon &&
+      lastState.color === nextState.color &&
+      lastState.auto === nextState.auto
+    ) {
+      return;
     }
-  };
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await updateAccountPersonalization(
+          account.id,
+          nextState.icon,
+          nextState.color,
+          autoFundPrimary
+        );
+        lastSavedRef.current = nextState;
+      } catch (error) {
+        showToast('Failed to update account', 'error');
+      }
+    }, 250);
+  }, [account?.id, selectedIcon?.name, selectedColor, account?.auto_fund_primary, showToast]);
+
+  React.useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const createdLabel = account?.created_at
     ? new Date(account.created_at).toLocaleString()
@@ -265,19 +335,20 @@ const PersonalizeAccountScreen = ({navigation, route}) => {
             </View>
           </View>
 
-          {/* Auto-fund */}
-          <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
-            <Text style={styles.fieldLabel}>Auto-fund from Primary Earning</Text>
-            <View style={styles.toggleRow}>
-              <Text style={styles.toggleText}>Automatic top-up for this account</Text>
-              <Switch
-                value={autoFundPrimary}
-                onValueChange={setAutoFundPrimary}
-                trackColor={{false: '#E2E8F0', true: selectedColor}}
-                thumbColor={colors.white}
-              />
+          {account?.account_type === 'expenses' && (
+            <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
+              <Text style={styles.fieldLabel}>Auto-fund from Primary Earning</Text>
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleText}>Automatic top-up for this account</Text>
+                <Switch
+                  value={autoFundPrimary}
+                  onValueChange={handleAutoFundToggle}
+                  trackColor={{false: '#E2E8F0', true: selectedColor}}
+                  thumbColor={colors.white}
+                />
+              </View>
             </View>
-          </View>
+          )}
 
           {/* Created */}
           <View style={[styles.fieldCard, {borderWidth: 1, borderColor: selectedColor + '22'}]}>
@@ -286,30 +357,6 @@ const PersonalizeAccountScreen = ({navigation, route}) => {
           </View>
         </ScrollView>
       </Animated.View>
-
-      {/* Save Button */}
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity
-          style={[
-            styles.createButton,
-            {backgroundColor: selectedColor},
-            saving && styles.createButtonDisabled,
-            styles.createButtonShadow,
-          ]}
-          onPress={handleSave}
-          disabled={saving}
-          activeOpacity={0.85}>
-          <View style={styles.buttonGradientOverlay} />
-          {saving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <View style={styles.buttonContent}>
-              <Icon name="save-outline" size={22} color="#FFFFFF" />
-              <Text style={styles.createButtonText}>Save</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
 
       {/* Icon Dropdown Modal */}
       <Modal

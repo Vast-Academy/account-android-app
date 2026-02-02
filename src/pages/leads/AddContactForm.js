@@ -478,7 +478,7 @@ const AddContactForm = ({ initialPhone = '', initialType = 'lead', onSuccess, on
               onChange={handleInputChange}
               className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               rows="2"
-            ></textarea>
+             />
           </div>
         </div>
         
@@ -510,7 +510,7 @@ const AddContactForm = ({ initialPhone = '', initialType = 'lead', onSuccess, on
                 className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                 rows="3"
                 placeholder="Enter initial customer remarks or notes..."
-              ></textarea>
+               />
             </div>
           </div>
         )}
@@ -526,7 +526,7 @@ const AddContactForm = ({ initialPhone = '', initialType = 'lead', onSuccess, on
                 className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                 rows="3"
                 placeholder="Enter initial query or remarks..."
-              ></textarea>
+               />
             </div>
             
             <div className="mb-4">

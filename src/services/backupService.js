@@ -9,7 +9,7 @@ import {
   uploadAppDataFile,
 } from './driveService';
 
-const DB_FILE_BASES = ['accountsDB.db', 'ledgerDB.db', 'accountApp.db'];
+const DB_FILE_BASES = ['accountsDB.db', 'ledgerDB.db', 'accountApp.db', 'chatDB.db'];
 const BACKUP_DIR = `${RNFS.CachesDirectoryPath}/backup_tmp`;
 const ARCHIVE_NAME_PREFIX = 'backup_';
 const BACKUP_META_KEY = 'backup.meta';

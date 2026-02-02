@@ -218,7 +218,7 @@ useEffect(() => {
                   className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows="3"
                   placeholder={`Enter instructions for the technician ${isComplaint ? 'handling this complaint' : ''}...`}
-                ></textarea>
+                 />
               </div>
             </form>
           )}

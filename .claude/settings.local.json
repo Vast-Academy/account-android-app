@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(if not exist backup mkdir backup)",
+      "Bash(test -d \"E:\\\\account-android-app\\\\AccountApp\\\\backup\")"
+    ]
+  }
+}

@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import DashboardScreen from '../screens/DashboardScreen';
 import LedgerScreen from '../screens/LedgerScreen';
+import ChatScreen from '../screens/ChatScreen';
 import MoreScreen from '../screens/MoreScreen';
 import Header from '../components/Header';
 import {colors, fontSize} from '../utils/theme';
@@ -103,6 +104,15 @@ const MainTabNavigator = ({route}) => {
           options={{
             tabBarIcon: ({color, size}) => (
               <Icon name="book" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Chat"
+          component={ChatScreen}
+          options={{
+            tabBarIcon: ({color, size}) => (
+              <Icon name="chatbubbles" size={size} color={color} />
             ),
           }}
         />

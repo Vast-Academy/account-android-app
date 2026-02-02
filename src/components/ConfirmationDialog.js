@@ -22,7 +22,7 @@ const ConfirmationDialog = ({
       <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center">
         {/* Background overlay */}
         <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-          <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+          <div className="absolute inset-0 bg-gray-500 opacity-75" />
         </div>
         
         {/* Center dialog */}

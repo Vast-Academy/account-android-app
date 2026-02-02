@@ -16,6 +16,7 @@ import { saveFirebaseToken } from '../utils/tokenManager';
 import {ensureDriveScopes} from '../services/driveService';
 import {findLatestBackupFile, restoreFromBackup} from '../services/backupService';
 import RNRestart from 'react-native-restart';
+import { onUserLogin } from '../services/chatInitializer';
 
 const LoginScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
@@ -143,6 +144,14 @@ const LoginScreen = ({ navigation }) => {
 
         if (normalizedUser?.firebaseUid) {
           await AsyncStorage.setItem('firebaseUid', normalizedUser.firebaseUid);
+        }
+
+        // Sync profile to chat backend (MongoDB)
+        try {
+          await onUserLogin(normalizedUser);
+          console.log('✅ User profile synced to chat backend');
+        } catch (chatError) {
+          console.warn('⚠️ Chat profile sync failed (non-blocking):', chatError);
         }
 
         // Auto-set backup email from Google Sign-In (cannot be changed)

@@ -75,20 +75,21 @@ const migrateAccountTypeConstraintToIncludeSaving = db => {
           icon_color TEXT,
           balance REAL DEFAULT 0,
           is_primary INTEGER DEFAULT 0,
+          auto_fund_primary INTEGER DEFAULT 0,
           sort_index INTEGER,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
       `);
       db.execute(
-        `INSERT INTO accounts_new (id, account_name, account_type, icon, icon_color, balance, is_primary, sort_index, created_at, updated_at)
+        `INSERT INTO accounts_new (id, account_name, account_type, icon, icon_color, balance, is_primary, auto_fund_primary, sort_index, created_at, updated_at)
          SELECT id, account_name,
                 CASE
                   WHEN account_type NOT IN ${ACCOUNT_TYPE_CHECK_SQL}
                     THEN 'expenses'
                   ELSE account_type
                 END,
-                icon, icon_color, balance, is_primary, sort_index, created_at, updated_at
+                icon, icon_color, balance, is_primary, 0, sort_index, created_at, updated_at
          FROM accounts`
       );
       db.execute('DROP TABLE accounts');

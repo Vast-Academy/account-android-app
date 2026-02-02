@@ -13,8 +13,10 @@
     "@notifee/react-native": "^7.8.1",
     "@react-native-async-storage/async-storage": "^1.24.0",
     "@react-native-community/datetimepicker": "^8.6.0",
-    "@react-native-firebase/app": "^23.7.0",
-    "@react-native-firebase/auth": "^23.7.0",
+    "@react-native-community/netinfo": "^11.5.1",
+    "@react-native-firebase/app": "^23.8.5",
+    "@react-native-firebase/auth": "^23.8.5",
+    "@react-native-firebase/messaging": "^23.8.5",
     "@react-native-google-signin/google-signin": "^16.1.1",
     "@react-native-picker/picker": "^2.11.4",
     "@react-native/gradle-plugin": "^0.83.1",
@@ -25,6 +27,7 @@
     "@react-navigation/stack": "^7.1.1",
     "axios": "^1.13.2",
     "hermes-parser": "^0.33.3",
+    "libphonenumber-js": "^1.12.36",
     "phosphor-react-native": "^2.3.1",
     "react": "19.2.0",
     "react-native": "0.83.1",
@@ -32,6 +35,7 @@
     "react-native-contacts": "^8.0.3",
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "^2.22.0",
+    "react-native-gifted-chat": "^3.3.2",
     "react-native-image-crop-picker": "^0.51.1",
     "react-native-image-picker": "^7.1.0",
     "react-native-image-zoom-viewer": "^3.0.1",
@@ -65,5 +69,7 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "@react-native-firebase/app": "23.8.5",
+  "@react-native-firebase/auth": "23.8.5"
 }

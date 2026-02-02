@@ -1,9 +1,11 @@
-﻿import React, {useCallback, useEffect, useRef, useState} from 'react';
+// SCREEN: Expenses Account (ExpensesAccountDetailScreen)
+﻿import React, {useCallback, useEffect, useRef, useState, useMemo} from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
+  FlatList,
   ScrollView,
   Pressable,
   TouchableOpacity,
@@ -87,32 +89,6 @@ const DEFAULT_MONTH_START_DAY = 1;
 const METRIC_ICON_SIZE = 28;
 const METRIC_LABEL_GAP = 6;
 const METRIC_LABEL_OFFSET = METRIC_ICON_SIZE + METRIC_LABEL_GAP;
-const LOW_BALANCE_PREF_KEY = 'expensesLowBalancePref';
-const LEGACY_LOW_BALANCE_PREF_KEY = String.fromCharCode(
-  108,
-  105,
-  97,
-  98,
-  105,
-  108,
-  105,
-  116,
-  121,
-  76,
-  111,
-  119,
-  66,
-  97,
-  108,
-  97,
-  110,
-  99,
-  101,
-  80,
-  114,
-  101,
-  102
-);
 
 const withAlpha = (hex, alpha) => {
   if (!hex || typeof hex !== 'string') {
@@ -191,11 +167,12 @@ const getMimeType = extension => {
 };
 
 const ExpensesAccountDetailScreen = ({route, navigation}) => {
-  const account = route?.params?.account || {
+  const initialAccount = route?.params?.account || {
     id: null,
     account_name: '',
     is_primary: 0,
   };
+  const [account, setAccount] = useState(initialAccount);
   const isSavingAccount = account?.account_type === 'saving';
 
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -233,9 +210,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
-  const [lowBalancePromptVisible, setLowBalancePromptVisible] = useState(false);
-  const [rememberLowBalanceChoice, setRememberLowBalanceChoice] = useState(false);
-  const [lowBalancePreference, setLowBalancePreference] = useState(null);
   const [pendingWithdrawAmount, setPendingWithdrawAmount] = useState(null);
   const [pendingWithdrawTotal, setPendingWithdrawTotal] = useState(null);
   const [primaryEarningAccount, setPrimaryEarningAccount] = useState(null);
@@ -251,10 +225,12 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   const [filteredAdded, setFilteredAdded] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [filteredTransactions, setFilteredTransactions] = useState([]);
+  const [hasLoadedTransactions, setHasLoadedTransactions] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
+  const [hasAppliedFilter, setHasAppliedFilter] = useState(false);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
   const {showUniversalToast} = useUniversalToast();
   const currencySymbol = useCurrencySymbol();
-  const scrollViewRef = useRef(null);
   const requestAmountInputRef = useRef(null);
   const withdrawAmountInputRef = useRef(null);
   const transferAmountInputRef = useRef(null);
@@ -274,7 +250,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     renameModalVisible ||
     optionsVisible ||
     menuVisible ||
-    lowBalancePromptVisible ||
     isBottomSheetVisible ||
     addReceiptSheetVisible ||
     receiptPreviewVisible;
@@ -301,10 +276,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       if (requestModalVisible) {
         setRequestModalVisible(false);
         setRequestNote('');
-        return true;
-      }
-      if (lowBalancePromptVisible) {
-        setLowBalancePromptVisible(false);
         return true;
       }
       if (optionsVisible) {
@@ -348,7 +319,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     withdrawModalVisible,
     transferModalVisible,
     requestModalVisible,
-    lowBalancePromptVisible,
     optionsVisible,
     menuVisible,
     editAmountVisible,
@@ -359,10 +329,23 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     receiptPreviewVisible,
   ]);
 
+  const loadAccountDetails = useCallback(() => {
+    if (!account?.id) {
+      return;
+    }
+    const accounts = getAllAccounts();
+    const updated = accounts.find(item => String(item.id) === String(account.id));
+    if (!updated) {
+      return;
+    }
+    setAccount(updated);
+  }, [account?.id]);
+
   const loadTransactions = useCallback(() => {
     if (!account.id) {
       setTransactions([]);
       setTotalBalance(0);
+      setHasLoadedTransactions(false);
       return;
     }
     try {
@@ -373,31 +356,34 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       setTotalBalance(balance);
     } catch (error) {
       console.error('Failed to load transactions:', error);
+    } finally {
+      setHasLoadedTransactions(true);
     }
   }, [account.id]);
 
   useEffect(() => {
     initTransactionsDatabase();
+    loadAccountDetails();
     loadTransactions();
     loadMonthStartDay();
-  }, [loadTransactions]);
+  }, [loadAccountDetails, loadTransactions]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
+      loadAccountDetails();
       loadMonthStartDay();
       loadTransactions();
     });
     return unsubscribe;
-  }, [navigation, loadMonthStartDay, loadTransactions]);
+  }, [navigation, loadAccountDetails, loadMonthStartDay, loadTransactions]);
 
   useEffect(() => {
-    if (!scrollViewRef.current) {
-      return;
+    const nextAccount = route?.params?.account;
+    if (nextAccount?.id && String(nextAccount.id) !== String(account?.id)) {
+      setAccount(nextAccount);
     }
-    requestAnimationFrame(() => {
-      scrollViewRef.current?.scrollToEnd({animated: true});
-    });
-  }, [transactions]);
+  }, [route?.params?.account, account?.id]);
+
 
   useEffect(() => {
     const years = new Set();
@@ -408,42 +394,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     setAvailableYears(Array.from(years).sort((a, b) => b - a));
   }, [transactions]);
 
-  useEffect(() => {
-    if (!account?.id) {
-      setLowBalancePreference(null);
-      return;
-    }
-    let isActive = true;
-    const loadLowBalancePreference = async () => {
-      try {
-        const newKey = `${LOW_BALANCE_PREF_KEY}:${account.id}`;
-        const legacyKey = `${LEGACY_LOW_BALANCE_PREF_KEY}:${account.id}`;
-        let value = await AsyncStorage.getItem(newKey);
-
-        if (value !== 'auto' && value !== 'never') {
-          const legacyValue = await AsyncStorage.getItem(legacyKey);
-          if (legacyValue === 'auto' || legacyValue === 'never') {
-            await AsyncStorage.setItem(newKey, legacyValue);
-            await AsyncStorage.removeItem(legacyKey);
-            value = legacyValue;
-          } else {
-            value = null;
-          }
-        }
-
-        if (!isActive) {
-          return;
-        }
-        setLowBalancePreference(value);
-      } catch (error) {
-        console.error('Failed to load low balance preference:', error);
-      }
-    };
-    loadLowBalancePreference();
-    return () => {
-      isActive = false;
-    };
-  }, [account?.id]);
 
   useEffect(() => {
     if (
@@ -1207,13 +1157,14 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }
     setLoading(true);
     try {
-      await renameAccount(account.id, newAccountName.trim());
-      navigation.setParams({
-        account: {
-          ...account,
-          account_name: newAccountName.trim(),
-        },
-      });
+      const nextName = newAccountName.trim();
+      await renameAccount(account.id, nextName);
+      const nextAccount = {
+        ...account,
+        account_name: nextName,
+      };
+      setAccount(nextAccount);
+      navigation.setParams({account: nextAccount});
       showUniversalToast('Account renamed successfully', 'success');
       closeRenameModal();
     } catch (error) {
@@ -1284,40 +1235,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       const toRemark = trimmedNote
         ? `Requested from ${primary.account_name} - ${trimmedNote}`
         : `Requested from ${primary.account_name}`;
-      if (finalizeWithdrawal) {
-        const finalAmount =
-          withdrawalAmount !== null ? withdrawalAmount : amountValue;
-        const expensePending = [
-          {
-            id: 'pending-expense-request',
-            amount: Math.abs(amountValue),
-            transaction_date: entryTimestamp,
-            is_deleted: 0,
-            orderIndex: 1,
-          },
-          {
-            id: 'pending-expense-withdraw',
-            amount: -Math.abs(finalAmount),
-            transaction_date: entryTimestamp,
-            is_deleted: 0,
-            orderIndex: 2,
-          },
-        ];
-        if (
-          !canWithdrawAtTimestampWithEntries(
-            finalAmount,
-            entryTimestamp,
-            transactions,
-            expensePending
-          )
-        ) {
-          showUniversalToast(
-            'Withdrawal not allowed. Balance was insufficient at that time.',
-            'error'
-          );
-          return false;
-        }
-      }
       await createTransaction(
         primary.id,
         -amountValue,
@@ -1372,60 +1289,6 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     }
   };
 
-  const saveLowBalancePreference = async value => {
-    if (!account?.id) {
-      return;
-    }
-    try {
-      await AsyncStorage.setItem(
-        `${LOW_BALANCE_PREF_KEY}:${account.id}`,
-        value
-      );
-      setLowBalancePreference(value);
-    } catch (error) {
-      console.error('Failed to save low balance preference:', error);
-    }
-  };
-
-  const closeLowBalancePrompt = () => {
-    setLowBalancePromptVisible(false);
-    setPendingWithdrawAmount(null);
-    setPendingWithdrawTotal(null);
-  };
-
-  const handleLowBalancePromptYes = async () => {
-    if (!pendingWithdrawAmount) {
-      closeLowBalancePrompt();
-      return;
-    }
-    if (rememberLowBalanceChoice) {
-      await saveLowBalancePreference('auto');
-    }
-    const success = await requestFromPrimaryEarning(
-      pendingWithdrawAmount,
-      withdrawNote,
-      {
-        finalizeWithdrawal: true,
-        withdrawalAmount:
-          pendingWithdrawTotal !== null
-            ? pendingWithdrawTotal
-            : pendingWithdrawAmount,
-      }
-    );
-    closeLowBalancePrompt();
-    if (success) {
-      setWithdrawModalVisible(false);
-    }
-  };
-
-  const handleLowBalancePromptNo = async () => {
-    if (rememberLowBalanceChoice) {
-      await saveLowBalancePreference('never');
-    }
-    closeLowBalancePrompt();
-    showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
-  };
-
   const handleWithdraw = async () => {
     if (isSavingAccount) {
       showUniversalToast(
@@ -1449,38 +1312,18 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
       transactions,
       entryTimestamp
     );
-    if (amountValue <= balanceAtTimestamp) {
-      const expensePending = [
-        {
-          id: 'pending-expense-withdraw',
-          amount: -amountValue,
-          transaction_date: entryTimestamp,
-          is_deleted: 0,
-          orderIndex: 1,
-        },
-      ];
-      if (
-        !canWithdrawAtTimestampWithEntries(
-          amountValue,
-          entryTimestamp,
-          transactions,
-          expensePending
-        )
-      ) {
-        showUniversalToast(
-          'Withdrawal not allowed. Balance was insufficient at that time.',
-          'error'
-        );
-        return false;
-      }
-    }
     if (amountValue > balanceAtTimestamp) {
       const shortfall = Math.max(0, amountValue - balanceAtTimestamp);
-      if (lowBalancePreference === 'never') {
-        showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
-        return false;
-      }
-      if (lowBalancePreference === 'auto') {
+      const freshAccount = getAllAccounts().find(
+        item => String(item.id) === String(account?.id)
+      );
+      const autoFundEnabled = Number(
+        (freshAccount || account)?.auto_fund_primary
+      ) === 1;
+      if (autoFundEnabled) {
+        if (freshAccount) {
+          setAccount(freshAccount);
+        }
         const success = await requestFromPrimaryEarning(
           shortfall,
           withdrawNote,
@@ -1491,19 +1334,7 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
         }
         return success;
       }
-      const primary = getPrimaryEarningAccount();
-      if (!primary) {
-        Alert.alert(
-          'No Primary Account',
-          'Please set a primary earning account first.'
-        );
-        return false;
-      }
-      setPrimaryEarningAccount(primary);
-      setPendingWithdrawAmount(shortfall);
-      setPendingWithdrawTotal(amountValue);
-      setRememberLowBalanceChoice(false);
-      setLowBalancePromptVisible(true);
+      showUniversalToast(`Low balance on ${account.account_name}.`, 'error');
       return false;
     }
 
@@ -1926,11 +1757,15 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   };
 
   const updateFilteredData = () => {
+    setIsFiltering(true);
+
     if (selectedMonth !== null && selectedYear !== null) {
       calculateMonthYearData(selectedMonth, selectedYear);
     } else {
       calculateQuickPeriodData(quickPeriod);
     }
+    setIsFiltering(false);
+    setHasAppliedFilter(true);
   };
 
   const handleQuickPeriodSelect = period => {
@@ -2103,7 +1938,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
   };
 
   useEffect(() => {
-    updateFilteredData();
+    const task = InteractionManager.runAfterInteractions(() => {
+      updateFilteredData();
+    });
+    return () => task.cancel();
   }, [quickPeriod, selectedMonth, selectedYear, transactions, monthStartDay]);
 
   useEffect(() => {
@@ -2156,30 +1994,76 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
     return {startTime: start.getTime(), endTime: end.getTime()};
   };
 
+  const displayTransactions = useMemo(
+    () => {
+      if (!hasAppliedFilter && transactions.length > 0) {
+        return transactions;
+      }
+      if (isFiltering && filteredTransactions.length === 0) {
+        return transactions;
+      }
+      return filteredTransactions;
+    },
+    [hasAppliedFilter, isFiltering, filteredTransactions, transactions]
+  );
+
+  const transactionList = useMemo(() => {
+    let runningBalance = 0;
+    const chronological = displayTransactions.map(txn => {
+      const isDeleted = Number(txn.is_deleted) === 1;
+      const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
+      const balanceAfter = runningBalance + txnAmount;
+      runningBalance = balanceAfter;
+      return {txn, balanceAfter, isDeleted};
+    });
+    const reversed = chronological.slice().reverse();
+    let lastDateKey = '';
+    return reversed.map(entry => {
+      const dateKey = new Date(entry.txn.transaction_date).toDateString();
+      const showDate = dateKey !== lastDateKey;
+      lastDateKey = dateKey;
+      return {...entry, showDate};
+    });
+  }, [displayTransactions]);
+
   const renderTransactions = () => {
-    if (filteredTransactions.length === 0) {
+    if (!hasLoadedTransactions) {
+      return null;
+    }
+    if (transactions.length === 0) {
       return (
-        <View style={styles.emptyHistory}>
+        <View style={[styles.scrollContent, styles.historySection, styles.emptyHistory]}>
           <Icon name="receipt-outline" size={48} color="#D1D5DB" />
           <Text style={styles.emptyText}>No transactions yet</Text>
         </View>
       );
+    }    if (displayTransactions.length === 0 && hasAppliedFilter) {
+      return (
+        <View style={[styles.scrollContent, styles.historySection, styles.emptyHistory]}>
+          <Icon name="receipt-outline" size={48} color="#D1D5DB" />
+          <Text style={styles.emptyText}>No transactions in this period. Please change quick period above.</Text>
+        </View>
+      );
     }
 
-    let lastDateKey = '';
-    let runningBalance = 0;
+    if (transactionList.length === 0) {
+      return null;
+    }
 
     return (
-      <View style={styles.chatList}>
-        {filteredTransactions.map(txn => {
-          const dateKey = new Date(txn.transaction_date).toDateString();
-          const showDate = dateKey !== lastDateKey;
-          lastDateKey = dateKey;
-
-          const isDeleted = Number(txn.is_deleted) === 1;
-          const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
-          const balanceAfter = runningBalance + txnAmount;
-          runningBalance = balanceAfter;
+      <FlatList
+        data={transactionList}
+        keyExtractor={item => String(item.txn.id)}
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          styles.historySection,
+          styles.chatList,
+        ]}
+        showsVerticalScrollIndicator={false}
+        inverted
+        renderItem={({item}) => {
+          const {txn, balanceAfter, isDeleted, showDate} = item;
           const isDebit = Number(txn.amount) < 0;
           const editCount = Number(txn.edit_count) || 0;
           const editHistory = editCount ? parseEditHistory(txn) : [];
@@ -2279,8 +2163,8 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
               </Pressable>
             </View>
           );
-        })}
-      </View>
+        }}
+      />
     );
   };
 
@@ -2437,88 +2321,10 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
           </View>
         </View>
       </View>
+      <View style={styles.listSpacer}>
+        {renderTransactions()}
+      </View>
 
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({animated: false})}>
-        {/* Transaction History */}
-        <View style={styles.historySection}>{renderTransactions()}</View>
-      </ScrollView>
-
-      <Modal
-        visible={lowBalancePromptVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeLowBalancePrompt}>
-        <View style={styles.promptOverlay}>
-          <View style={styles.promptCard}>
-            <Text style={styles.promptTitle}>Low balance</Text>
-            <Text style={styles.promptMessage}>
-              Balance is low in{' '}
-              <Text
-                style={[
-                  styles.promptAccountName,
-                  account.icon_color && {color: account.icon_color},
-                ]}>
-                {account.account_name}
-              </Text>
-              . Request {formatCurrency(pendingWithdrawAmount || 0)} from{' '}
-              <Text
-                style={[
-                  styles.promptAccountName,
-                  primaryEarningAccount?.icon_color && {
-                    color: primaryEarningAccount.icon_color,
-                  },
-                ]}>
-                {primaryEarningAccount?.account_name || 'primary account'}
-              </Text>
-              ?
-            </Text>
-            <TouchableOpacity
-              style={styles.promptRemember}
-              onPress={() =>
-                setRememberLowBalanceChoice(current => !current)
-              }>
-              <View
-                style={[
-                  styles.promptCheckbox,
-                  rememberLowBalanceChoice && styles.promptCheckboxChecked,
-                  rememberLowBalanceChoice &&
-                    account.icon_color && {
-                      backgroundColor: account.icon_color,
-                      borderColor: account.icon_color,
-                    },
-                ]}>
-                {rememberLowBalanceChoice && (
-                  <Icon name="checkmark" size={14} color={colors.white} />
-                )}
-              </View>
-              <Text style={styles.promptRememberText}>
-                Remember my choice for this account
-              </Text>
-            </TouchableOpacity>
-            <View style={styles.promptActions}>
-              <TouchableOpacity
-                style={[styles.promptButton, styles.promptButtonSecondary]}
-                onPress={handleLowBalancePromptNo}>
-                <Text style={styles.promptButtonTextSecondary}>No</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.promptButton,
-                  styles.promptButtonPrimary,
-                  account.icon_color && {backgroundColor: account.icon_color},
-                ]}
-                onPress={handleLowBalancePromptYes}>
-                <Text style={styles.promptButtonTextPrimary}>Yes</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Bottom Fixed Section */}
       <View
@@ -3389,10 +3195,9 @@ const ExpensesAccountDetailScreen = ({route, navigation}) => {
               style={styles.optionButton}
               onPress={() => {
                 closeAccountMenu();
-                Alert.alert(
-                  'Personalization',
-                  'Personalization options not yet implemented.'
-                );
+                navigation.navigate('PersonalizeAccount', {
+                  accountId: account.id,
+                });
               }}>
               <View style={styles.optionItemRow}>
                 <Icon
@@ -3695,8 +3500,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
     padding: spacing.md,
     paddingBottom: spacing.xl,
   },
@@ -3924,6 +3727,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.xl,
   },
+  listSpacer: {
+
+    flex: 1,
+
+    minHeight: 280,
+
+  },
+
   chatList: {
     gap: spacing.md,
   },
@@ -4059,6 +3870,8 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: colors.text.secondary,
     marginTop: 12,
+    textAlign: 'center',
+
   },
   bottomSection: {
     backgroundColor: colors.white,
@@ -4483,84 +4296,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: colors.text.primary,
     fontWeight: fontWeight.semibold,
-  },
-  promptOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  promptCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: spacing.md,
-  },
-  promptTitle: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.bold,
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  promptMessage: {
-    fontSize: fontSize.medium,
-    color: colors.text.secondary,
-    marginBottom: spacing.md,
-  },
-  promptAccountName: {
-    fontWeight: fontWeight.semibold,
-  },
-  promptRemember: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  promptCheckbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm,
-    backgroundColor: colors.white,
-  },
-  promptCheckboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  promptRememberText: {
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-  },
-  promptActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
-  },
-  promptButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-  },
-  promptButtonSecondary: {
-    backgroundColor: '#F3F4F6',
-  },
-  promptButtonPrimary: {
-    backgroundColor: colors.primary,
-  },
-  promptButtonTextSecondary: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.primary,
-  },
-  promptButtonTextPrimary: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: colors.white,
   },
 });
 

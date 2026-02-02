@@ -220,7 +220,7 @@ const ModernBusinessLandingPage = () => {
           <div className="grid md:grid-cols-3 gap-8">
             {/* Feature Card 1 - Updated Style */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition duration-300 hover:shadow-md">
-              <div className="h-2 bg-red-600"></div>
+              <div className="h-2 bg-red-600" />
               <div className="p-8">
                 <div className="w-12 h-12 bg-blue-100 text-red-600 rounded-lg flex items-center justify-center mb-6">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -251,7 +251,7 @@ const ModernBusinessLandingPage = () => {
             
             {/* Feature Card 2 - Updated Style */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition duration-300 hover:shadow-md">
-              <div className="h-2 bg-red-600"></div>
+              <div className="h-2 bg-red-600" />
               <div className="p-8">
                 <div className="w-12 h-12 bg-blue-100 text-red-600 rounded-lg flex items-center justify-center mb-6">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -281,7 +281,7 @@ const ModernBusinessLandingPage = () => {
             
             {/* Feature Card 3 - Updated Style */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition duration-300 hover:shadow-md">
-              <div className="h-2 bg-red-600"></div>
+              <div className="h-2 bg-red-600" />
               <div className="p-8">
                 <div className="w-12 h-12 bg-blue-100 text-red-600 rounded-lg flex items-center justify-center mb-6">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

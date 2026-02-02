@@ -1,10 +1,11 @@
-import React, {useState, useEffect, useCallback, useRef} from 'react';
+// SCREEN: Earning Account (AccountDetailScreen)
+import React, {useState, useEffect, useCallback, useRef, useMemo} from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
-  ScrollView,
+  FlatList,
   Pressable,
   TouchableOpacity,
   Alert,
@@ -195,11 +196,12 @@ const getMimeType = extension => {
 };
 
 const AccountDetailScreen = ({route, navigation}) => {
-  const account = route?.params?.account || {
+  const initialAccount = route?.params?.account || {
     id: null,
     account_name: '',
     is_primary: 0,
   };
+  const [account, setAccount] = useState(initialAccount);
   const {showToast} = useToast();
   const currencySymbol = useCurrencySymbol();
 
@@ -211,7 +213,7 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [totalBalance, setTotalBalance] = useState(0);
-  const [isPrimary, setIsPrimary] = useState(account.is_primary === 1);
+  const [isPrimary, setIsPrimary] = useState(initialAccount.is_primary === 1);
   const [menuVisible, setMenuVisible] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
@@ -244,8 +246,10 @@ const AccountDetailScreen = ({route, navigation}) => {
   const [filteredAdded, setFilteredAdded] = useState(0);
   const [filteredWithdrawals, setFilteredWithdrawals] = useState(0);
   const [filteredTransactions, setFilteredTransactions] = useState([]);
+  const [hasLoadedTransactions, setHasLoadedTransactions] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
+  const [hasAppliedFilter, setHasAppliedFilter] = useState(false);
   const [monthStartDay, setMonthStartDay] = useState(DEFAULT_MONTH_START_DAY);
-  const scrollViewRef = useRef(null);
   const renameInputRef = useRef(null);
   const modalSlideAnim = useRef(new Animated.Value(0)).current;
   const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
@@ -313,8 +317,6 @@ const AccountDetailScreen = ({route, navigation}) => {
     menuVisible,
     receiptPreviewVisible,
   ]);
-
-
 
   const ensureReceiptsDir = useCallback(async () => {
     const receiptsDir = `${RNFS.DocumentDirectoryPath}/receipts`;
@@ -487,10 +489,24 @@ const AccountDetailScreen = ({route, navigation}) => {
       console.warn('Failed to delete receipt image:', error);
     }
   }, []);
+  const loadAccountDetails = useCallback(() => {
+    if (!account?.id) {
+      return;
+    }
+    const accounts = getAllAccounts();
+    const updated = accounts.find(item => String(item.id) === String(account.id));
+    if (!updated) {
+      return;
+    }
+    setAccount(updated);
+    setIsPrimary(updated.is_primary === 1);
+  }, [account?.id]);
+
   const loadTransactions = useCallback(() => {
     if (!account.id) {
       setTransactions([]);
       setTotalBalance(0);
+      setHasLoadedTransactions(false);
       return;
     }
     try {
@@ -501,6 +517,8 @@ const AccountDetailScreen = ({route, navigation}) => {
       setTotalBalance(balance);
     } catch (error) {
       console.error('Failed to load transactions:', error);
+    } finally {
+      setHasLoadedTransactions(true);
     }
   }, [account.id]);
 
@@ -562,26 +580,28 @@ const AccountDetailScreen = ({route, navigation}) => {
   useEffect(() => {
     initTransactionsDatabase();
     initRecurringDatabase();
+    loadAccountDetails();
     loadTransactions();
     loadMonthStartDay();
-  }, [loadTransactions]);
+  }, [loadAccountDetails, loadTransactions]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
+      loadAccountDetails();
       loadMonthStartDay();
       loadTransactions();
     });
     return unsubscribe;
-  }, [navigation, loadMonthStartDay, loadTransactions]);
+  }, [navigation, loadAccountDetails, loadMonthStartDay, loadTransactions]);
 
   useEffect(() => {
-    if (!scrollViewRef.current) {
-      return;
+    const nextAccount = route?.params?.account;
+    if (nextAccount?.id && String(nextAccount.id) !== String(account?.id)) {
+      setAccount(nextAccount);
+      setIsPrimary(nextAccount.is_primary === 1);
     }
-    requestAnimationFrame(() => {
-      scrollViewRef.current?.scrollToEnd({animated: true});
-    });
-  }, [transactions]);
+  }, [route?.params?.account, account?.id]);
+
 
   useEffect(() => {
     const years = new Set();
@@ -1077,13 +1097,14 @@ const AccountDetailScreen = ({route, navigation}) => {
     }
     setLoading(true);
     try {
-      await renameAccount(account.id, newAccountName.trim());
-      navigation.setParams({
-        account: {
-          ...account,
-          account_name: newAccountName.trim(),
-        },
-      });
+      const nextName = newAccountName.trim();
+      await renameAccount(account.id, nextName);
+      const nextAccount = {
+        ...account,
+        account_name: nextName,
+      };
+      setAccount(nextAccount);
+      navigation.setParams({account: nextAccount});
       showToast('Account renamed successfully', 'success');
       closeRenameModal();
     } catch (error) {
@@ -1588,11 +1609,15 @@ const AccountDetailScreen = ({route, navigation}) => {
   };
 
   const updateFilteredData = () => {
+    setIsFiltering(true);
+
     if (selectedMonth !== null && selectedYear !== null) {
       calculateMonthYearData(selectedMonth, selectedYear);
     } else {
       calculateQuickPeriodData(quickPeriod);
     }
+    setIsFiltering(false);
+    setHasAppliedFilter(true);
   };
 
   const handleQuickPeriodSelect = period => {
@@ -1765,7 +1790,10 @@ const AccountDetailScreen = ({route, navigation}) => {
   };
 
   useEffect(() => {
-    updateFilteredData();
+    const task = InteractionManager.runAfterInteractions(() => {
+      updateFilteredData();
+    });
+    return () => task.cancel();
   }, [quickPeriod, selectedMonth, selectedYear, transactions, monthStartDay]);
 
   const normalizeMonthStartDay = value => {
@@ -1810,30 +1838,76 @@ const AccountDetailScreen = ({route, navigation}) => {
     return {startTime: start.getTime(), endTime: end.getTime()};
   };
 
+  const displayTransactions = useMemo(
+    () => {
+      if (!hasAppliedFilter && transactions.length > 0) {
+        return transactions;
+      }
+      if (isFiltering && filteredTransactions.length === 0) {
+        return transactions;
+      }
+      return filteredTransactions;
+    },
+    [hasAppliedFilter, isFiltering, filteredTransactions, transactions]
+  );
+
+  const transactionList = useMemo(() => {
+    let runningBalance = 0;
+    const chronological = displayTransactions.map(txn => {
+      const isDeleted = Number(txn.is_deleted) === 1;
+      const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
+      const balanceAfter = runningBalance + txnAmount;
+      runningBalance = balanceAfter;
+      return {txn, balanceAfter, isDeleted};
+    });
+    const reversed = chronological.slice().reverse();
+    let lastDateKey = '';
+    return reversed.map(entry => {
+      const dateKey = new Date(entry.txn.transaction_date).toDateString();
+      const showDate = dateKey !== lastDateKey;
+      lastDateKey = dateKey;
+      return {...entry, showDate};
+    });
+  }, [displayTransactions]);
+
   const renderTransactions = () => {
-    if (filteredTransactions.length === 0) {
+    if (!hasLoadedTransactions) {
+      return null;
+    }
+    if (transactions.length === 0) {
       return (
-        <View style={styles.emptyHistory}>
+        <View style={[styles.scrollContent, styles.historySection, styles.emptyHistory]}>
           <Icon name="receipt-outline" size={48} color="#D1D5DB" />
           <Text style={styles.emptyText}>No transactions yet</Text>
         </View>
       );
+    }    if (displayTransactions.length === 0 && hasAppliedFilter) {
+      return (
+        <View style={[styles.scrollContent, styles.historySection, styles.emptyHistory]}>
+          <Icon name="receipt-outline" size={48} color="#D1D5DB" />
+          <Text style={styles.emptyText}>No transactions in this period. Please change quick period above.</Text>
+        </View>
+      );
     }
 
-    let lastDateKey = '';
-    let runningBalance = 0;
+    if (transactionList.length === 0) {
+      return null;
+    }
 
     return (
-      <View style={styles.chatList}>
-        {filteredTransactions.map(txn => {
-          const dateKey = new Date(txn.transaction_date).toDateString();
-          const showDate = dateKey !== lastDateKey;
-          lastDateKey = dateKey;
-
-          const isDeleted = Number(txn.is_deleted) === 1;
-          const txnAmount = isDeleted ? 0 : Number(txn.amount) || 0;
-          const balanceAfter = runningBalance + txnAmount;
-          runningBalance = balanceAfter;
+      <FlatList
+        data={transactionList}
+        keyExtractor={item => String(item.txn.id)}
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          styles.historySection,
+          styles.chatList,
+        ]}
+        showsVerticalScrollIndicator={false}
+        inverted
+        renderItem={({item}) => {
+          const {txn, balanceAfter, isDeleted, showDate} = item;
           const editCount = Number(txn.edit_count) || 0;
           const editHistory = editCount ? parseEditHistory(txn) : [];
           const isTransfer = isTransferTransaction(txn);
@@ -1941,8 +2015,8 @@ const AccountDetailScreen = ({route, navigation}) => {
               </Pressable>
             </View>
           );
-        })}
-      </View>
+        }}
+      />
     );
   };
 
@@ -2123,18 +2197,9 @@ const AccountDetailScreen = ({route, navigation}) => {
           </View>
         </View>
       </View>
-
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({animated: false})}>
-        {/* Transaction History */}
-        <View style={styles.historySection}>
-          {renderTransactions()}
-        </View>
-      </ScrollView>
+      <View style={styles.listSpacer}>
+        {renderTransactions()}
+      </View>
 
       {/* Bottom Fixed Section */}
       <View
@@ -2597,10 +2662,9 @@ const AccountDetailScreen = ({route, navigation}) => {
               style={styles.optionButton}
               onPress={() => {
                 closeAccountMenu();
-                Alert.alert(
-                  'Personalization',
-                  'Personalization options not yet implemented.'
-                );
+                navigation.navigate('PersonalizeAccount', {
+                  accountId: account.id,
+                });
               }}>
               <View style={styles.optionItemRow}>
                 <Icon
@@ -2760,8 +2824,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
     padding: spacing.md,
     paddingBottom: spacing.xl,
   },
@@ -3613,6 +3675,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.xl,
   },
+  listSpacer: {
+
+    flex: 1,
+
+    minHeight: 280,
+
+  },
+
   historyTitle: {
     fontSize: fontSize.large,
     fontWeight: fontWeight.semibold,
@@ -3792,6 +3862,8 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     color: colors.text.secondary,
     marginTop: 12,
+    textAlign: 'center',
+
   },
   bottomSection: {
     backgroundColor: colors.white,

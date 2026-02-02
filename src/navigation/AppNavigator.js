@@ -16,6 +16,8 @@ import BackupScreen from '../screens/BackupScreen';
 import CurrencySetupScreen from '../screens/CurrencySetupScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
 import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
+import UserSearchScreen from '../screens/UserSearchScreen';
+import ChatConversationScreen from '../screens/ChatConversationScreen';
 
 const Stack = createStackNavigator();
 
@@ -44,6 +46,8 @@ const AppNavigator = () => {
         <Stack.Screen name="CurrencySetup" component={CurrencySetupScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+        <Stack.Screen name="UserSearch" component={UserSearchScreen} />
+        <Stack.Screen name="ChatConversation" component={ChatConversationScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

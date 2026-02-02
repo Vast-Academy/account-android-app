@@ -1094,8 +1094,8 @@ const fetchFreshWorkOrders = async () => {
           className={`w-full text-left px-4 py-2 text-sm ${darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'} flex items-center`}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="mr-2 h-4 w-4" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           Settings
         </button>
@@ -1108,9 +1108,9 @@ const fetchFreshWorkOrders = async () => {
           className={`w-full text-left px-4 py-2 text-sm ${darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'} flex items-center`}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="mr-2 h-4 w-4" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
           </svg>
           Logout
         </button>
@@ -1176,7 +1176,7 @@ const fetchFreshWorkOrders = async () => {
                 className={`${darkMode ? 'bg-gradient-to-br from-blue-500 to-blue-600' : 'bg-gradient-to-br from-blue-400 to-blue-500'} rounded-2xl shadow-lg p-4 relative overflow-hidden text-white cursor-pointer`}
                 onClick={() => handleTabChange('current-project')}
               >
-                <div className="absolute right-0 top-0 w-20 h-20 bg-blue-400 rounded-full opacity-20 -mt-10 -mr-10"></div>
+                <div className="absolute right-0 top-0 w-20 h-20 bg-blue-400 rounded-full opacity-20 -mt-10 -mr-10" />
                 <div className="relative z-10">
                   <div className="bg-white/20 w-10 h-10 rounded-full flex items-center justify-center mb-2">
                     <Clipboard size={20} />
@@ -1194,7 +1194,7 @@ const fetchFreshWorkOrders = async () => {
                 className={`${darkMode ? 'bg-gradient-to-br from-amber-500 to-amber-600' : 'bg-gradient-to-br from-amber-400 to-amber-500'} rounded-2xl shadow-lg p-4 relative overflow-hidden text-white cursor-pointer`}
                 onClick={() => handleTabChange('pending-approval-projects')}
               >
-                <div className="absolute right-0 top-0 w-20 h-20 bg-amber-400 rounded-full opacity-20 -mt-10 -mr-10"></div>
+                <div className="absolute right-0 top-0 w-20 h-20 bg-amber-400 rounded-full opacity-20 -mt-10 -mr-10" />
                 <div className="relative z-10">
                   <div className="bg-white/20 w-10 h-10 rounded-full flex items-center justify-center mb-2">
                     <Activity size={20} />
@@ -1212,7 +1212,7 @@ const fetchFreshWorkOrders = async () => {
                 className={`${darkMode ? 'bg-gradient-to-br from-green-500 to-green-600' : 'bg-gradient-to-br from-green-400 to-green-500'} rounded-2xl shadow-lg p-4 relative overflow-hidden text-white cursor-pointer`}
                 onClick={() => handleTabChange('transferred-projects')}
               >
-                <div className="absolute right-0 top-0 w-20 h-20 bg-green-400 rounded-full opacity-20 -mt-10 -mr-10"></div>
+                <div className="absolute right-0 top-0 w-20 h-20 bg-green-400 rounded-full opacity-20 -mt-10 -mr-10" />
                 <div className="relative z-10">
                   <div className="bg-white/20 w-10 h-10 rounded-full flex items-center justify-center mb-2">
                     <CheckSquare size={20} />
@@ -1228,7 +1228,7 @@ const fetchFreshWorkOrders = async () => {
                 className={`${darkMode ? 'bg-gradient-to-br from-purple-500 to-purple-600' : 'bg-gradient-to-br from-purple-400 to-purple-500'} rounded-2xl shadow-lg p-4 relative overflow-hidden text-white cursor-pointer`}
                 onClick={() => handleTabChange('inventory')}
               >
-                <div className="absolute right-0 top-0 w-20 h-20 bg-purple-400 rounded-full opacity-20 -mt-10 -mr-10"></div>
+                <div className="absolute right-0 top-0 w-20 h-20 bg-purple-400 rounded-full opacity-20 -mt-10 -mr-10" />
                 <div className="relative z-10">
                   <div className="bg-white/20 w-10 h-10 rounded-full flex items-center justify-center mb-2">
                     <Package size={20} />
@@ -1523,7 +1523,7 @@ const fetchFreshWorkOrders = async () => {
                       strokeLinejoin="round" 
                       className={`mr-2 transition-transform duration-200 ${isExpanded ? 'transform rotate-180' : ''} ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}
                     >
-                      <polyline points="6 9 12 15 18 9"></polyline>
+                      <polyline points="6 9 12 15 18 9" />
                     </svg>
                   )}
                   {item.type === 'service' ? (
@@ -1878,7 +1878,7 @@ const fetchFreshWorkOrders = async () => {
                     placeholder="Enter your remarks here..."
                     value={pauseProjectRemark}
                     onChange={(e) => setPauseProjectRemark(e.target.value)}
-                  ></textarea>
+                   />
                   
                   <div className="flex p-4 border-t">
                     <button
@@ -1972,7 +1972,7 @@ const fetchFreshWorkOrders = async () => {
           placeholder="Enter detailed reason for stopping this project..."
           value={transferRemark}
           onChange={(e) => setTransferRemark(e.target.value)}
-        ></textarea>
+         />
         
         <div className="flex p-4 border-t">
           <button

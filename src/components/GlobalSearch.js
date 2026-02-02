@@ -111,7 +111,7 @@ const GlobalSearch = () => {
         
         {loading && (
           <div className="absolute right-3 top-3">
-            <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+            <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
           </div>
         )}
       </div>

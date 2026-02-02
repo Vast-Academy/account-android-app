@@ -532,7 +532,7 @@ useEffect(() => {
                   }`}
                   rows="3"
                   placeholder="Enter any notes for this approval (min 5 words)..."
-                ></textarea>
+                 />
                 
                 {/* शब्द गणना प्रदर्शित करें */}
                 <div className="mt-1 flex justify-between">

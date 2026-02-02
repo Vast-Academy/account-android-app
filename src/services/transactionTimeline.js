@@ -8,8 +8,16 @@
       }
       const orderA = Number.isFinite(a.orderIndex) ? a.orderIndex : null;
       const orderB = Number.isFinite(b.orderIndex) ? b.orderIndex : null;
-      if (orderA !== null && orderB !== null && orderA !== orderB) {
-        return orderA - orderB;
+      if (orderA !== null || orderB !== null) {
+        if (orderA === null) {
+          return 1;
+        }
+        if (orderB === null) {
+          return -1;
+        }
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
       }
       return String(a.id).localeCompare(String(b.id));
     });

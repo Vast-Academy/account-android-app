@@ -5,6 +5,7 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
+  Alert,
   Keyboard,
   BackHandler,
   InteractionManager,
@@ -22,9 +23,9 @@ import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import AmountActionButton from '../components/AmountActionButton';
-import {getAllAccounts} from '../services/accountsDatabase';
+import {getAllAccounts, getPrimaryEarningAccount} from '../services/accountsDatabase';
 import {createTransaction, calculateAccountBalance, getTransactionsByAccount} from '../services/transactionsDatabase';
-import {canWithdrawAtTimestampWithEntries} from '../services/transactionTimeline';
+import {canWithdrawAtTimestampWithEntries, getBalanceAtTimestampWithEntries} from '../services/transactionTimeline';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ITEM_HEIGHT = 44;
@@ -232,6 +233,37 @@ const AmountEntryScreen = ({route, navigation}) => {
     navigation.goBack();
   };
 
+  const openLowBalancePrompt = () => {
+    const message = isExpenseAccount
+      ? 'Add amount first or enable Auto Get option.'
+      : 'Add amount first.';
+    if (isExpenseAccount) {
+      Alert.alert(
+        'Balance is low',
+        message,
+        [
+          {
+            text: 'Open Auto Get option',
+            onPress: () => {
+              if (account?.id) {
+                navigation.navigate('PersonalizeAccount', {accountId: account.id});
+              }
+            },
+          },
+          {text: 'OK', style: 'cancel'},
+        ],
+        {cancelable: false},
+      );
+      return;
+    }
+    Alert.alert(
+      'Balance is low',
+      message,
+      [{text: 'OK', style: 'cancel'}],
+      {cancelable: false},
+    );
+  };
+
   const handleSubmit = async action => {
     const parsedAmount = parseFloat(amount);
     if (!parsedAmount || parsedAmount <= 0) {
@@ -255,6 +287,74 @@ const AmountEntryScreen = ({route, navigation}) => {
     const noteText = note?.trim?.() ?? note ?? '';
     const entryTimestamp = entryDate?.getTime?.() ?? Date.now();
 
+    const requestFromPrimaryEarning = async (amountValue) => {
+      const primary = getPrimaryEarningAccount();
+      if (!primary) {
+        showToast(
+          'Please set a primary earning account first.',
+          'error'
+        );
+        return false;
+      }
+      try {
+        const earningEntries = getTransactionsByAccount(primary.id);
+        const earningPending = [
+          {
+            id: 'pending-earning-request',
+            amount: -Math.abs(amountValue),
+            transaction_date: entryTimestamp,
+            is_deleted: 0,
+            orderIndex: 1,
+          },
+        ];
+        if (
+          !canWithdrawAtTimestampWithEntries(
+            Math.abs(amountValue),
+            entryTimestamp,
+            earningEntries,
+            earningPending
+          )
+        ) {
+          showToast(
+            `Request not allowed. ${primary.account_name} had insufficient balance at that time.`,
+            'error'
+          );
+          return false;
+        }
+        const earningBalance = calculateAccountBalance(primary.id);
+        if (earningBalance < Math.abs(amountValue)) {
+          showToast(`Low balance on ${primary.account_name}.`, 'error');
+          return false;
+        }
+
+        const trimmedNote = noteText.trim();
+        const fromRemark = trimmedNote
+          ? `Requested by ${account.account_name} - ${trimmedNote}`
+          : `Requested by ${account.account_name}`;
+        const toRemark = trimmedNote
+          ? `Requested from ${primary.account_name} - ${trimmedNote}`
+          : `Requested from ${primary.account_name}`;
+
+        await createTransaction(
+          primary.id,
+          -Math.abs(amountValue),
+          fromRemark,
+          entryTimestamp
+        );
+        await createTransaction(
+          account.id,
+          Math.abs(amountValue),
+          toRemark,
+          entryTimestamp
+        );
+        return true;
+      } catch (error) {
+        console.error('Failed to request amount:', error);
+        showToast('Failed to request amount. Please try again.', 'error');
+        return false;
+      }
+    };
+
     if (action === 'add') {
       try {
         await createTransaction(
@@ -274,15 +374,47 @@ const AmountEntryScreen = ({route, navigation}) => {
 
     if (action === 'withdraw' || action === 'transfer') {
       const accountEntries = getTransactionsByAccount(account.id);
-      const pendingEntries = [
-        {
-          id: 'pending-entry',
-          amount: -Math.abs(parsedAmount),
-          transaction_date: entryTimestamp,
-          is_deleted: 0,
-          orderIndex: 1,
-        },
-      ];
+      const balanceAtTimestamp = getBalanceAtTimestampWithEntries(
+        accountEntries,
+        entryTimestamp
+      );
+      const freshAccount = getAllAccounts().find(
+        acc => String(acc.id) === String(account.id)
+      );
+      const autoFundEnabled =
+        action === 'withdraw' &&
+        isExpenseAccount &&
+        Number((freshAccount || account)?.auto_fund_primary) === 1;
+      const needsAutoFund = autoFundEnabled && parsedAmount > balanceAtTimestamp;
+      const shortfall = needsAutoFund
+        ? Math.max(0, parsedAmount - balanceAtTimestamp)
+        : 0;
+      const pendingEntries = needsAutoFund
+        ? [
+            {
+              id: 'pending-auto-fund',
+              amount: shortfall,
+              transaction_date: entryTimestamp,
+              is_deleted: 0,
+              orderIndex: 0,
+            },
+            {
+              id: 'pending-entry',
+              amount: -Math.abs(parsedAmount),
+              transaction_date: entryTimestamp,
+              is_deleted: 0,
+              orderIndex: 1,
+            },
+          ]
+        : [
+            {
+              id: 'pending-entry',
+              amount: -Math.abs(parsedAmount),
+              transaction_date: entryTimestamp,
+              is_deleted: 0,
+              orderIndex: 1,
+            },
+          ];
       if (
         !canWithdrawAtTimestampWithEntries(
           Math.abs(parsedAmount),
@@ -291,6 +423,10 @@ const AmountEntryScreen = ({route, navigation}) => {
           pendingEntries
         )
       ) {
+        if (action === 'withdraw' && !scheduleApplied) {
+          openLowBalancePrompt();
+          return;
+        }
         const actionLabel = action === 'transfer' ? 'Transfer' : 'Withdrawal';
         showToast(
           `${actionLabel} not allowed. Balance was insufficient at that time.`,
@@ -298,15 +434,40 @@ const AmountEntryScreen = ({route, navigation}) => {
         );
         return;
       }
-      const balance = calculateAccountBalance(account.id);
-      if (parsedAmount > balance) {
-        showToast('Balance is low. Add amount first to withdraw.', 'error');
-        return;
+      if (!needsAutoFund) {
+        const balance = calculateAccountBalance(account.id);
+        if (parsedAmount > balance) {
+          if (action === 'withdraw' && !scheduleApplied) {
+            openLowBalancePrompt();
+            return;
+          }
+          showToast('Balance is low. Add amount first to withdraw.', 'error');
+          return;
+        }
       }
     }
 
     if (action === 'withdraw') {
       try {
+        const accountEntries = getTransactionsByAccount(account.id);
+        const balanceAtTimestamp = getBalanceAtTimestampWithEntries(
+          accountEntries,
+          entryTimestamp
+        );
+        const freshAccount = getAllAccounts().find(
+          acc => String(acc.id) === String(account.id)
+        );
+        const autoFundEnabled =
+          isExpenseAccount &&
+          Number((freshAccount || account)?.auto_fund_primary) === 1;
+        const needsAutoFund = autoFundEnabled && parsedAmount > balanceAtTimestamp;
+        if (needsAutoFund) {
+          const shortfall = Math.max(0, parsedAmount - balanceAtTimestamp);
+          const autoFunded = await requestFromPrimaryEarning(shortfall);
+          if (!autoFunded) {
+            return;
+          }
+        }
         await createTransaction(
           account.id,
           -Math.abs(parsedAmount),
@@ -951,6 +1112,7 @@ const AmountEntryScreen = ({route, navigation}) => {
             </View>
           </View>
         )}
+
           {schedulePopupVisible && (
           <View style={styles.scheduleOverlay}>
             <Pressable style={styles.scheduleBackdrop} onPress={closeSchedulePopup} />

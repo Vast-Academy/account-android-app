@@ -197,7 +197,7 @@ const fetchCustomerProjects = async () => {
                 rows="4"
                 placeholder="Enter details about the complaint..."
                 required
-              ></textarea>
+               />
             </div>
             
             <div className="flex justify-end space-x-3">
