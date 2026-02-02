@@ -11,6 +11,9 @@ import {
   Animated,
   Keyboard,
   ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -22,6 +25,7 @@ import {
   createTransaction as createLedgerTransaction,
   getTransactionsByContact,
   calculateContactBalance,
+  getUnifiedTimeline,
 } from '../services/ledgerDatabase';
 import {
   initAccountsDatabase,
@@ -31,6 +35,15 @@ import {
   initTransactionsDatabase,
   createTransaction as createAccountTransaction,
 } from '../services/transactionsDatabase';
+import {searchUsersByPhone} from '../services/userProfileService';
+import {
+  createConversation,
+  insertMessage,
+  getMessages,
+  initChatDatabase,
+} from '../services/chatDatabase';
+import {sendMessageToUser} from '../services/messagingService';
+import auth from '@react-native-firebase/auth';
 
 const LEDGER_GET_DEFAULT_MODE_KEY = 'ledgerGetDefaultMode';
 const LEDGER_GET_DEFAULT_PREFIX = 'ledgerGetDefault:';
@@ -67,17 +80,29 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const [rememberGetChoice, setRememberGetChoice] = useState(false);
   const [getDefaultChoice, setGetDefaultChoice] = useState(null);
 
+  // Chat state
+  const [unifiedTimeline, setUnifiedTimeline] = useState([]);
+  const [chatMessage, setChatMessage] = useState('');
+  const [isAppUser, setIsAppUser] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+
   // Animation values
   const modalSlideAnim = useRef(new Animated.Value(300)).current;
   const scrollViewRef = useRef(null);
+  const flatListRef = useRef(null);
   const amountInputRef = useRef(null);
   const noteInputRef = useRef(null);
+  const chatInputRef = useRef(null);
 
   useEffect(() => {
     initLedgerDatabase();
     initAccountsDatabase();
     initTransactionsDatabase();
+    initChatDatabase();
     loadData();
+    setupContactData();
   }, []);
 
   useEffect(() => {
@@ -183,6 +208,64 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     loadPaidDefault();
   }, [contact?.recordID]);
 
+  const setupContactData = async () => {
+    if (!contact) {
+      return;
+    }
+
+    // Check if contact is an app user
+    if (contact.isAppUser && contact.userId) {
+      setIsAppUser(true);
+
+      // Get or create conversation
+      try {
+        const currentUserId = auth().currentUser?.uid;
+        if (!currentUserId) {
+          console.error('Current user not authenticated');
+          return;
+        }
+
+        // Create or get conversation with the contact
+        const convId = createConversation(contact.userId, {
+          username: contact.username,
+          displayName: contact.displayName || contact.givenName || 'Contact',
+          phoneNumber: contact.phoneNumbers?.[0]?.number || '',
+          photoURL: contact.photoURL || '',
+        });
+
+        setConversationId(convId);
+
+        // Load chat messages for this conversation
+        loadUnifiedTimeline(convId);
+      } catch (error) {
+        console.error('Error setting up conversation:', error);
+      }
+    } else {
+      setIsAppUser(false);
+      setConversationId(null);
+    }
+  };
+
+  const loadUnifiedTimeline = async (convId) => {
+    if (!contact?.recordID || !convId) {
+      return;
+    }
+
+    try {
+      setTimelineLoading(true);
+      // Get messages for this conversation
+      const messages = getMessages ? getMessages(convId) : [];
+
+      // Get unified timeline (transactions + messages)
+      const timeline = getUnifiedTimeline(contact.recordID, messages);
+      setUnifiedTimeline(timeline);
+    } catch (error) {
+      console.error('Error loading unified timeline:', error);
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
+
   const loadData = () => {
     if (!contact?.recordID) {
       return;
@@ -192,6 +275,11 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
 
     const bal = calculateContactBalance(contact.recordID);
     setBalance(bal);
+
+    // Reload unified timeline if conversation exists
+    if (conversationId && isAppUser) {
+      loadUnifiedTimeline(conversationId);
+    }
   };
 
   const getContactName = () => {
@@ -239,6 +327,38 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       setRememberGetChoice(false);
       setGetPromptVisible(false);
     });
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatMessage.trim() || !isAppUser || !conversationId || !contact?.userId) {
+      return;
+    }
+
+    const messageText = chatMessage.trim();
+    setChatMessage('');
+
+    try {
+      setSendingMessage(true);
+
+      // Send message via messaging service
+      await sendMessageToUser(contact.userId, {
+        text: messageText,
+        messageType: 'text',
+      });
+
+      // Reload timeline to show new message
+      if (conversationId) {
+        await loadUnifiedTimeline(conversationId);
+      }
+
+      showToast('Message sent', 'success');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      showToast('Failed to send message', 'error');
+      setChatMessage(messageText); // Restore message on error
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   const resolvePrimaryEarningAccount = () => {
@@ -439,6 +559,60 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     await submitTransaction(false);
   };
 
+  const handleOpenChat = async () => {
+    try {
+      if (!contact?.phoneNumbers || contact.phoneNumbers.length === 0) {
+        Alert.alert('No Phone Number', 'This contact does not have a phone number.');
+        return;
+      }
+
+      const phoneNumber = contact.phoneNumbers[0].number;
+
+      // Search if user exists on app
+      const users = await searchUsersByPhone(phoneNumber);
+
+      if (users.length === 0) {
+        Alert.alert(
+          'User Not Found',
+          `${getContactName()} is not using the app yet.`,
+          [
+            {text: 'Cancel', style: 'cancel'},
+            {
+              text: 'Invite',
+              onPress: () => {
+                // Can add SMS invite functionality here
+                console.log('Invite user');
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      const user = users[0];
+
+      // Create or get conversation
+      const conversationId = createConversation(user.userId, {
+        username: user.username,
+        displayName: user.displayName,
+        phoneNumber: user.phoneNumber,
+        photoURL: user.photoURL,
+      });
+
+      // Navigate to chat
+      navigation.navigate('ChatConversation', {
+        conversationId,
+        otherUserId: user.userId,
+        otherUserName: user.displayName,
+        otherUserUsername: user.username,
+        otherUserPhoto: user.photoURL,
+      });
+    } catch (error) {
+      console.error('Error opening chat:', error);
+      Alert.alert('Error', 'Could not open chat');
+    }
+  };
+
   const formatCurrency = amount => {
     return `${currencySymbol} ${Math.abs(amount).toLocaleString('en-IN')}`;
   };
@@ -465,6 +639,90 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const renderTimelineItem = ({item, index}) => {
+    if (item.type === 'transaction') {
+      const isGet = item.transactionType === 'get';
+      const color = isGet ? '#10B981' : '#EF4444';
+      const icon = isGet ? 'arrow-down' : 'arrow-up';
+      const label = isGet ? 'Received' : 'Paid';
+
+      return (
+        <View style={[styles.timelineItem, {paddingVertical: 8}]}>
+          <View
+            style={[
+              styles.transactionBubble,
+              {borderLeftColor: color},
+            ]}>
+            <View style={styles.transactionHeader}>
+              <Icon name={icon} size={16} color={color} />
+              <Text style={[styles.transactionLabel, {color}]}>
+                {label}
+              </Text>
+            </View>
+            <Text style={styles.transactionAmount}>
+              {formatCurrency(item.amount)}
+            </Text>
+            {item.note ? <Text style={styles.transactionNote}>{item.note}</Text> : null}
+            <Text style={styles.timelineTime}>{formatTimeLabel(item.timestamp)}</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (item.type === 'message') {
+      const currentUserId = auth().currentUser?.uid;
+      const isOwn = item.senderId === currentUserId;
+      const bubbleStyle = isOwn ? styles.sentBubble : styles.receivedBubble;
+      const textStyle = isOwn ? styles.sentText : styles.receivedText;
+
+      return (
+        <View style={[styles.timelineItem, {paddingVertical: 4}]}>
+          <View style={bubbleStyle}>
+            <Text style={textStyle}>{item.text}</Text>
+            <Text style={styles.messageTime}>{formatTimeLabel(item.timestamp)}</Text>
+          </View>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
+  const renderTimelineEmpty = () => {
+    if (timelineLoading) {
+      return (
+        <View style={styles.emptyTimeline}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.emptyText, {marginTop: spacing.md}]}>Loading...</Text>
+        </View>
+      );
+    }
+
+    if (!isAppUser) {
+      return (
+        <View style={styles.emptyTimeline}>
+          <Icon name="receipt-outline" size={48} color="#D1D5DB" />
+          <Text style={styles.emptyText}>No transactions yet</Text>
+          <Text style={styles.emptySubtext}>
+            Tap "Paid" or "Get" to record a transaction
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.emptyTimeline}>
+        <Icon name="chatbubbles-outline" size={48} color="#D1D5DB" />
+        <Text style={styles.emptyText}>
+          Start a conversation or record a transaction
+        </Text>
+        <Text style={styles.emptySubtext}>
+          Messages and transactions will appear here
+        </Text>
+      </View>
+    );
   };
 
   const renderTransactions = () => {
@@ -555,7 +813,11 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
             <Icon name="arrow-back" size={24} color={colors.text.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{getContactName()}</Text>
-          <View style={styles.headerRight} />
+          <TouchableOpacity
+            style={styles.chatButton}
+            onPress={handleOpenChat}>
+            <Icon name="chatbubbles-outline" size={24} color={colors.primary} />
+          </TouchableOpacity>
         </View>
         <View style={styles.metricsRow}>
           <View style={styles.metricColumn}>
@@ -595,13 +857,61 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         </View>
       </View>
 
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.historySection}>{renderTransactions()}</View>
-      </ScrollView>
+      {/* Unified Timeline - FlatList with inverted property */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.timelineContainer}>
+        {isAppUser && unifiedTimeline.length > 0 ? (
+          <FlatList
+            ref={flatListRef}
+            data={unifiedTimeline}
+            renderItem={renderTimelineItem}
+            keyExtractor={(item) => item.id}
+            inverted={true}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.timelineContent}
+            ListEmptyComponent={renderTimelineEmpty}
+          />
+        ) : (
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.historySection}>{renderTransactions()}</View>
+          </ScrollView>
+        )}
+      </KeyboardAvoidingView>
+
+      {/* Chat Input Bar - Only visible for app users */}
+      {isAppUser && (
+        <View style={styles.chatInputContainer}>
+          <TextInput
+            ref={chatInputRef}
+            style={styles.chatInput}
+            placeholder="Type message..."
+            placeholderTextColor="#9CA3AF"
+            value={chatMessage}
+            onChangeText={setChatMessage}
+            multiline
+            maxLength={2000}
+            editable={!sendingMessage}
+          />
+          <TouchableOpacity
+            style={[
+              styles.chatSendButton,
+              (!chatMessage.trim() || sendingMessage) && styles.chatSendButtonDisabled,
+            ]}
+            onPress={handleSendMessage}
+            disabled={!chatMessage.trim() || sendingMessage}>
+            <Icon
+              name="send"
+              size={20}
+              color={chatMessage.trim() && !sendingMessage ? colors.primary : '#D1D5DB'}
+            />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Bottom Buttons */}
       <View style={styles.bottomButtons}>
@@ -894,8 +1204,8 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
   },
-  headerRight: {
-    width: 40,
+  chatButton: {
+    padding: spacing.xs,
   },
   scrollView: {
     flex: 1,
@@ -1444,6 +1754,127 @@ const styles = StyleSheet.create({
     fontSize: fontSize.medium,
     fontWeight: fontWeight.semibold,
     color: colors.white,
+  },
+  // Timeline styles
+  timelineContainer: {
+    flex: 1,
+  },
+  timelineContent: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  timelineItem: {
+    marginVertical: spacing.xs,
+  },
+  transactionBubble: {
+    backgroundColor: colors.white,
+    borderLeftWidth: 4,
+    borderRadius: 8,
+    padding: spacing.md,
+    elevation: 1,
+  },
+  transactionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+    gap: spacing.xs,
+  },
+  transactionLabel: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
+  },
+  transactionAmount: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  transactionNote: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+    fontStyle: 'italic',
+  },
+  sentBubble: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    alignSelf: 'flex-end',
+    maxWidth: '80%',
+    marginLeft: '20%',
+  },
+  sentText: {
+    color: colors.white,
+    fontSize: fontSize.regular,
+  },
+  receivedBubble: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    alignSelf: 'flex-start',
+    maxWidth: '80%',
+    marginRight: '20%',
+  },
+  receivedText: {
+    color: colors.text.primary,
+    fontSize: fontSize.regular,
+  },
+  timelineTime: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+  messageTime: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+  emptyTimeline: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  emptySubtext: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  // Chat input styles
+  chatInputContainer: {
+    backgroundColor: colors.white,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.regular,
+    color: colors.text.primary,
+    maxHeight: 100,
+  },
+  chatSendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  chatSendButtonDisabled: {
+    backgroundColor: '#F3F4F6',
   },
 });
 

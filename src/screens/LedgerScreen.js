@@ -35,6 +35,7 @@ import {
   getLatestTransactionDateByContact,
   getDistinctContactRecordIds,
 } from '../services/ledgerDatabase';
+import {matchContactsWithAppUsers} from '../services/contactMatchingService';
 
 const CONTACTS_STORAGE_KEY = 'ledgerContacts';
 const PINNED_CONTACT_IDS_STORAGE_KEY = 'pinnedLedgerContactIds';
@@ -198,7 +199,23 @@ const LedgerScreen = ({navigation}) => {
       await loadBalances();
     });
     return unsubscribe;
-  }, [navigation, contacts, getContactDisplayName]); // Add getContactDisplayName to dependencies
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation]);
+
+  const matchAppUsers = async (forceRefresh = false) => {
+    if (!contactsHydrated || contacts.length === 0) {
+      return;
+    }
+
+    try {
+      const enrichedContacts = await matchContactsWithAppUsers(contacts, forceRefresh);
+      setContacts(current =>
+        sortContactsByPinned(enrichedContacts, pinnedContactIds, latestTransactionDates)
+      );
+    } catch (error) {
+      console.error('Error matching app users:', error);
+    }
+  };
 
   const loadBalances = useCallback(async (contactsOverride) => {
     const baseContacts = contactsOverride || contacts;
@@ -445,7 +462,7 @@ const LedgerScreen = ({navigation}) => {
     return formatCurrency(amount);
   };
 
-  // Helper function for sorting contacts by pinned status
+  // Helper function for sorting contacts by pinned status and app user status
   const sortContactsByPinned = (contactsList, pinnedIds, latestDates = {}) => {
     if (!contactsList || contactsList.length === 0) {
       return [];
@@ -459,12 +476,20 @@ const LedgerScreen = ({navigation}) => {
     const unpinned = contactsList.filter(contact => !pinnedOrder.has(contact.recordID));
 
     pinned.sort((a, b) => pinnedOrder.get(a.recordID) - pinnedOrder.get(b.recordID));
-    // Sort unpinned contacts by latest transaction date (newest first)
+
+    // Sort unpinned contacts: App users first, then by latest transaction date
     unpinned.sort((a, b) => {
-        const dateA = latestDates[a.recordID] || 0;
-        const dateB = latestDates[b.recordID] || 0;
-        // Descending order: most recent first
-        return dateB - dateA;
+      // App users come first
+      const aIsAppUser = a.isAppUser ? 1 : 0;
+      const bIsAppUser = b.isAppUser ? 1 : 0;
+      if (aIsAppUser !== bIsAppUser) {
+        return bIsAppUser - aIsAppUser; // App users (1) before non-app users (0)
+      }
+
+      // Within same group, sort by latest transaction date (newest first)
+      const dateA = latestDates[a.recordID] || 0;
+      const dateB = latestDates[b.recordID] || 0;
+      return dateB - dateA;
     });
 
     return [...pinned, ...unpinned];
@@ -608,22 +633,24 @@ const LedgerScreen = ({navigation}) => {
     const balance = contactBalances[item.recordID] || {
       netBalance: 0,
     };
-  
+
     const balanceStatus =
       balance.netBalance > 0
         ? 'positive'
         : balance.netBalance < 0
         ? 'negative'
         : 'neutral';
-  
+
     const statusText =
       balanceStatus === 'positive'
         ? 'You will get'
         : balanceStatus === 'negative'
         ? 'You will give'
         : 'Settled';
-  
+
     const isPinned = pinnedContactIds.includes(item.recordID);
+    const isAppUser = item.isAppUser;
+    const username = item.username;
 
     return (
       <TouchableOpacity
@@ -641,14 +668,32 @@ const LedgerScreen = ({navigation}) => {
                 <MaterialIcon name="push-pin" size={12} color={colors.white} />
               </View>
             )}
+            {isAppUser && (
+              <View style={styles.appUserBadge}>
+                <Icon name="checkmark-circle" size={14} color={colors.success} />
+              </View>
+            )}
           </View>
           <View style={styles.contactDetails}>
-            <Text style={styles.contactName} numberOfLines={1}>
-              {name}
-            </Text>
-            <Text style={[styles.balanceText, styles[`balance_${balanceStatus}`]]}>
-              {statusText}
-            </Text>
+            <View style={styles.contactHeaderRow}>
+              <Text style={styles.contactName} numberOfLines={1}>
+                {name}
+              </Text>
+              {isAppUser && (
+                <View style={styles.savingoUserBadge}>
+                  <Text style={styles.savingoUserBadgeText}>Savingo User</Text>
+                </View>
+              )}
+            </View>
+            {isAppUser && username ? (
+              <Text style={styles.contactUsername} numberOfLines={1}>
+                @{username}
+              </Text>
+            ) : (
+              <Text style={[styles.balanceText, styles[`balance_${balanceStatus}`]]}>
+                {statusText}
+              </Text>
+            )}
           </View>
           <View style={styles.balanceInfo}>
             <Text style={[styles.balanceAmount, styles[`balance_${balanceStatus}`]]}>
@@ -1063,15 +1108,43 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 2,
   },
+  appUserBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    padding: 1,
+  },
   contactDetails: {
     flex: 1,
     minWidth: 0,
+  },
+  contactHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   contactName: {
     fontSize: 16,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
-    marginBottom: 4,
+  },
+  savingoUserBadge: {
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  savingoUserBadgeText: {
+    fontSize: 11,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+  },
+  contactUsername: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginTop: 2,
   },
   contactPhone: {
     fontSize: 13,
@@ -1237,15 +1310,6 @@ const styles = StyleSheet.create({
   },
   renameModalSaveButton: {
     backgroundColor: colors.primary,
-  },
-  renameModalButtonText: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.bold,
-    color: colors.white,
-  },
-  // Overriding button text color for cancel
-  renameModalCancelButton: {
-    backgroundColor: '#E5E7EB',
   },
   renameModalButtonText: {
     fontSize: fontSize.medium,

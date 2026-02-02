@@ -426,4 +426,65 @@ export const initLedgerDatabase = () => {
           return [];
         }
       };
+
+      /**
+       * Get unified timeline: transactions + messages merged chronologically
+       * @param {string} contactRecordId - The ledger contact ID
+       * @param {array} messages - Chat messages for this contact (from chatDatabase)
+       * @param {number} limit - Number of items to load (default 50)
+       * @param {number} offset - Pagination offset (default 0)
+       * @returns {array} Merged timeline items sorted by timestamp (descending)
+       */
+      export const getUnifiedTimeline = (contactRecordId, messages = [], limit = 50, offset = 0) => {
+        try {
+          const db = getDB();
+
+          // Get transactions for this contact
+          const result = db.execute(`
+            SELECT id, contact_record_id, amount, type, note, transaction_date, created_at
+            FROM ledger_transactions
+            WHERE contact_record_id = ?
+            ORDER BY transaction_date DESC
+          `, [String(contactRecordId)]);
+
+          const transactionRows = result.rows?._array || [];
+
+          // Create transaction items with type field
+          const transactionItems = transactionRows.map(transaction => ({
+            id: `txn_${transaction.id}`,
+            type: 'transaction',
+            timestamp: transaction.transaction_date,
+            amount: transaction.amount,
+            transactionType: transaction.type, // 'paid' or 'get'
+            note: transaction.note || '',
+            contactRecordId: transaction.contact_record_id,
+          }));
+
+          // Create message items with type field
+          const messageItems = (messages || []).map(message => ({
+            id: `msg_${message.message_id || message.id}`,
+            type: 'message',
+            timestamp: message.timestamp,
+            text: message.message_text || message.text || '',
+            senderId: message.sender_id || message.senderId || '',
+            receiverId: message.receiver_id || message.receiverId || '',
+            deliveryStatus: message.delivery_status || message.deliveryStatus || 'sent',
+            isRead: message.is_read || message.isRead || false,
+          }));
+
+          // Merge arrays
+          const merged = [...transactionItems, ...messageItems];
+
+          // Sort by timestamp descending (newest first - for inverted list)
+          merged.sort((a, b) => b.timestamp - a.timestamp);
+
+          // Apply pagination
+          const paginated = merged.slice(offset, offset + limit);
+
+          return paginated;
+        } catch (error) {
+          console.error('Failed to get unified timeline:', error);
+          return [];
+        }
+      };
       
