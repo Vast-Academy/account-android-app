@@ -174,9 +174,9 @@ const ProfileSetupScreen = ({navigation, route}) => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Basic Profile Setup</Text>
+        <Text style={styles.title}>Profile Setup</Text>
         <Text style={styles.subtitle}>
-          Add your name and phone number to continue.
+          Set your name, phone number, and unique username to continue.
         </Text>
       </View>
 
