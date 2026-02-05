@@ -4,6 +4,19 @@ import {cacheUserData, getCachedUser} from './chatDatabase';
 // Backend API base URL
 const API_URL = 'https://account-android-app-backend.vercel.app/api';
 
+const normalizeUserResult = user => {
+  if (!user) {
+    return null;
+  }
+  const userId = user.userId || user.firebaseUid || user.id || user._id || '';
+  const phoneNumber = user.phoneNumber || user.mobile || '';
+  return {
+    ...user,
+    userId,
+    phoneNumber,
+  };
+};
+
 /**
  * Get Firebase auth token
  */
@@ -70,7 +83,7 @@ export const syncUserProfileToCloud = async (userData) => {
         userId,
         username: userData.username?.toLowerCase() || '',
         displayName: userData.displayName || '',
-        phoneNumber: userData.phoneNumber || '',
+        mobile: userData.phoneNumber || userData.mobile || '',
         email: userData.email || '',
         photoURL: userData.photoURL || '',
         searchableTerms,
@@ -124,17 +137,81 @@ export const searchUsers = async (query, limit = 20) => {
 
     const data = await response.json();
 
+    const normalizedUsers = (data.users || []).map(normalizeUserResult).filter(Boolean);
+
     // Cache search results locally
-    if (data.users && data.users.length > 0) {
-      for (const user of data.users) {
+    if (normalizedUsers.length > 0) {
+      for (const user of normalizedUsers) {
         await cacheUserData(user);
       }
     }
 
-    return data.users || [];
+    return normalizedUsers;
   } catch (error) {
     console.error('Error searching users:', error);
     return [];
+  }
+};
+
+/**
+ * Batch search users by phone numbers (WhatsApp-style)
+ * Returns hash map: { "9876543210": userData, ... }
+ */
+export const batchSearchUsers = async (phoneNumbers) => {
+  console.log('🔧 DEBUG [batchSearchUsers]: Function called!');
+  console.log('🔧 DEBUG [batchSearchUsers]: Phone numbers:', phoneNumbers);
+  console.log('🔧 DEBUG [batchSearchUsers]: Count:', phoneNumbers?.length);
+
+  try {
+    if (!phoneNumbers || phoneNumbers.length === 0) {
+      console.log('⚠️ DEBUG [batchSearchUsers]: Empty phone numbers array, returning {}');
+      return {};
+    }
+
+    console.log('🔧 DEBUG [batchSearchUsers]: Getting auth token...');
+    const token = await getAuthToken();
+    console.log('✅ DEBUG [batchSearchUsers]: Got auth token:', token ? `${token.substring(0, 20)}...` : 'null');
+
+    const url = `${API_URL}/users/batch-search`;
+    console.log('🔧 DEBUG [batchSearchUsers]: API URL:', url);
+    console.log('🔧 DEBUG [batchSearchUsers]: Full API_URL:', API_URL);
+
+    const payload = { phoneNumbers };
+    console.log('📤 DEBUG [batchSearchUsers]: Payload:', JSON.stringify(payload));
+
+    console.log('🔧 DEBUG [batchSearchUsers]: Making fetch call...');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    console.log('📥 DEBUG [batchSearchUsers]: Response received!');
+    console.log('🔧 DEBUG [batchSearchUsers]: Response status:', response.status);
+    console.log('🔧 DEBUG [batchSearchUsers]: Response ok:', response.ok);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ DEBUG [batchSearchUsers]: Batch search failed!');
+      console.error('   Status:', response.status);
+      console.error('   Error:', errorText);
+      return {};
+    }
+
+    const data = await response.json();
+    console.log('✅ DEBUG [batchSearchUsers]: Response data:', data);
+    console.log('🔧 DEBUG [batchSearchUsers]: Users found:', Object.keys(data.users || {}).length);
+
+    return data.users || {};
+  } catch (error) {
+    console.error('❌ DEBUG [batchSearchUsers]: Error caught!');
+    console.error('   Error message:', error.message);
+    console.error('   Error stack:', error.stack);
+    console.error('   Full error:', error);
+    return {};
   }
 };
 
@@ -167,7 +244,7 @@ export const searchUsersByPhone = async (phoneNumber) => {
     }
 
     const data = await response.json();
-    return data.users || [];
+    return (data.users || []).map(normalizeUserResult).filter(Boolean);
   } catch (error) {
     console.error('Error searching by phone:', error);
     return [];
@@ -343,6 +420,7 @@ export default {
   syncUserProfileToCloud,
   searchUsers,
   searchUsersByPhone,
+  batchSearchUsers,
   getUserByUsername,
   getUserById,
   updateFCMToken,

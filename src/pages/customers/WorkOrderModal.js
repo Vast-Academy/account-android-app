@@ -128,7 +128,7 @@ const WorkOrderModal = ({ isOpen, onClose, customerId, initialProjectCategory = 
               className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               rows="3"
               placeholder={projectCategory === 'Repair' ? "Enter details about the complaint..." : "Enter details about the project..."}
-             />
+            ></textarea>
           </div>
           
           <div className="flex justify-end space-x-3">

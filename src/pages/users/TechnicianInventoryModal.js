@@ -251,7 +251,7 @@ const TechnicianInventoryModal = ({ isOpen, onClose, technician }) => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Modal backdrop */}
-      <div className="fixed inset-0 bg-black opacity-50" onClick={onClose} />
+      <div className="fixed inset-0 bg-black opacity-50" onClick={onClose}></div>
       
       {/* Modal content */}
       <div className="relative flex items-center justify-center min-h-screen p-4">

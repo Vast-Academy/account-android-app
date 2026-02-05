@@ -4,6 +4,7 @@ import {
   Text,
   Image,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Modal,
   TextInput,
@@ -262,10 +263,10 @@ const Header = ({user, onProfileUpdate}) => {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.leftSection}
+      <Pressable
         onPress={openProfile}
-        activeOpacity={0.7}>
+        android_ripple={{color: 'rgba(0,0,0,0.08)'}}
+        style={({pressed}) => [styles.leftSection, pressed && styles.leftSectionPressed]}>
         <View ref={avatarRef} collapsable={false}>
           {user?.photoURL ? (
             <Image source={{uri: user.photoURL}} style={styles.userImage} />
@@ -290,7 +291,7 @@ const Header = ({user, onProfileUpdate}) => {
             </Text>
           )}
         </View>
-      </TouchableOpacity>
+      </Pressable>
 
       <TouchableOpacity
         style={styles.backupButton}

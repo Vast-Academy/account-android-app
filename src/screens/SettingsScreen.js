@@ -172,7 +172,7 @@ const SettingsScreen = ({navigation}) => {
       </View>
 
       <ScrollView style={styles.scrollView}>
-        <View style={styles.section}>
+        {/* <View style={styles.section}>
           <Text style={styles.sectionTitle}>Common Settings</Text>
           {COMMON_SETTINGS.map(item => (
             <TouchableOpacity
@@ -186,7 +186,7 @@ const SettingsScreen = ({navigation}) => {
               <Icon name="chevron-forward" size={20} color={colors.text.light} />
             </TouchableOpacity>
           ))}
-        </View>
+        </View> */}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Profile</Text>

@@ -1839,16 +1839,8 @@ const AccountDetailScreen = ({route, navigation}) => {
   };
 
   const displayTransactions = useMemo(
-    () => {
-      if (!hasAppliedFilter && transactions.length > 0) {
-        return transactions;
-      }
-      if (isFiltering && filteredTransactions.length === 0) {
-        return transactions;
-      }
-      return filteredTransactions;
-    },
-    [hasAppliedFilter, isFiltering, filteredTransactions, transactions]
+    () => transactions,
+    [transactions]
   );
 
   const transactionList = useMemo(() => {
@@ -1879,13 +1871,6 @@ const AccountDetailScreen = ({route, navigation}) => {
         <View style={[styles.scrollContent, styles.historySection, styles.emptyHistory]}>
           <Icon name="receipt-outline" size={48} color="#D1D5DB" />
           <Text style={styles.emptyText}>No transactions yet</Text>
-        </View>
-      );
-    }    if (displayTransactions.length === 0 && hasAppliedFilter) {
-      return (
-        <View style={[styles.scrollContent, styles.historySection, styles.emptyHistory]}>
-          <Icon name="receipt-outline" size={48} color="#D1D5DB" />
-          <Text style={styles.emptyText}>No transactions in this period. Please change quick period above.</Text>
         </View>
       );
     }

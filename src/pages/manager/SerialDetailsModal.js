@@ -314,7 +314,7 @@ const SerialDetailsModal = ({ isOpen, onClose, productDetails, onRegisterWarrant
                 placeholder="Describe the issue with this product..."
                 className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
                 rows="3"
-               />
+              ></textarea>
               
               {/* Replace technician dropdown with Issue Checked By input */}
               <h3 className="text-sm text-gray-500 mt-4">Issue Checked By*</h3>

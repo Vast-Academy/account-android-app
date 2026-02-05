@@ -5,7 +5,7 @@ const LoadingSpinner = () => {
     <>
       {/* Top Progress Bar */}
       <div className="fixed top-0 left-0 right-0 h-1.5 z-50">
-        <div className="h-full bg-indigo-500 animate-progressBar" />
+        <div className="h-full bg-indigo-500 animate-progressBar"></div>
       </div>
      
       {/* Add this to your main content area (the area to the right of sidebar) */}

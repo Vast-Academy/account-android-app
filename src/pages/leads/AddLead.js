@@ -347,7 +347,7 @@ const AddLead = () => {
                 onChange={handleInputChange}
                 className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                 rows="2"
-               />
+              ></textarea>
             </div>
             
             <div>

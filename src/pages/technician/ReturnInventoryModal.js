@@ -320,7 +320,7 @@ const ReturnInventoryModal = ({ isOpen, onClose, onInventoryReturned, darkMode =
                             strokeLinejoin="round" 
                             className={`transition-transform duration-200 ${isExpanded ? 'transform rotate-180' : ''} ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}
                           >
-                            <polyline points="6 9 12 15 18 9" />
+                            <polyline points="6 9 12 15 18 9"></polyline>
                           </svg>
                         </div>
                       ) : (

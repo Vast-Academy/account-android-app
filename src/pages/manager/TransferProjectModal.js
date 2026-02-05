@@ -298,7 +298,7 @@ const TransferProjectModal = ({ isOpen, onClose, project, onProjectTransferred }
                 }`}
                 rows="3"
                 placeholder="Enter your notes for accepting this transfer request (min 5 words)..."
-               />
+              ></textarea>
               
               {/* Show word count */}
               <div className="mt-1 flex justify-between">

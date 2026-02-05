@@ -217,7 +217,7 @@ const DashboardLayout = () => {
             sidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
           onClick={() => setSidebarOpen(false)}
-         />
+        ></div>
       
       {/* Sidebar */}
       <div 

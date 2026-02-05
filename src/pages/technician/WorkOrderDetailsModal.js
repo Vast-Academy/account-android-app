@@ -844,7 +844,7 @@ const renderProjectContent = () => {
                       className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       rows="3"
                       placeholder="Enter any notes about the completed project..."
-                     />
+                    ></textarea>
                   </div>
                   
                   <button 
@@ -868,7 +868,7 @@ const renderProjectContent = () => {
                       className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       rows="3"
                       placeholder="Enter reason for pausing this project..."
-                     />
+                    ></textarea>
                   </div>
                   
                   <button 
@@ -896,7 +896,7 @@ const renderProjectContent = () => {
                   className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows="3"
                   placeholder="Enter reason for resuming this project..."
-                 />
+                ></textarea>
               </div>
               
               <button 

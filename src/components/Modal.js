@@ -59,7 +59,7 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
             onClose();
           }}
         >
-          <div className="absolute inset-0 bg-gray-500 opacity-75" />
+          <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
         </div>
         
         {/* Center modal */}

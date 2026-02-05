@@ -390,7 +390,7 @@ const LeadDetailModal = ({ isOpen, onClose, leadId, onLeadUpdated, onConvertSucc
                         rows="3"
                         placeholder="Enter your remark or follow-up notes..."
                         required
-                       />
+                      ></textarea>
                     </div>
                     
                     <div className="flex flex-wrap items-center justify-between">
@@ -520,7 +520,7 @@ const LeadDetailModal = ({ isOpen, onClose, leadId, onLeadUpdated, onConvertSucc
                           className="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           rows="4"
                           placeholder="Enter initial project requirements or details..."
-                         />
+                        ></textarea>
                       </div>
                     </div>
                     

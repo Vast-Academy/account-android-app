@@ -29,14 +29,32 @@ export const initLedgerDatabase = () => {
             );
           `);
       
+          
           db.execute(`
-            CREATE TABLE IF NOT EXISTS contact_nicknames (
+            CREATE TABLE IF NOT EXISTS contact_names (
               contact_record_id TEXT PRIMARY KEY,
-              nickname TEXT NOT NULL,
+              display_name TEXT NOT NULL,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
             );
           `);
+          // Migrate legacy nicknames into contact_names
+          try {
+            db.execute(`
+              INSERT OR IGNORE INTO contact_names (contact_record_id, display_name, created_at, updated_at)
+              SELECT contact_record_id, nickname, created_at, updated_at
+              FROM contact_nicknames
+            `);
+          } catch (e) {
+            // Legacy table missing or migration already handled
+          }
+
+          // Remove legacy nickname table
+          try {
+            db.execute('DROP TABLE IF EXISTS contact_nicknames');
+          } catch (e) {
+            // Ignore drop failures
+          }
       
           // Create index for faster lookups
           try {
@@ -222,9 +240,9 @@ export const initLedgerDatabase = () => {
       
           );
       
-          // Also delete any stored nickname for this contact
+          // Also delete any stored name for this contact
       
-          deleteContactNickname(contactRecordId);
+          deleteContactName(contactRecordId);
       
           return {success: true};
       
@@ -250,7 +268,8 @@ export const initLedgerDatabase = () => {
       
           db.execute('DELETE FROM ledger_transactions');
       
-          db.execute('DELETE FROM contact_nicknames');
+          db.execute('DELETE FROM contact_names');
+
       
           console.log('All ledger data cleared successfully.');
       
@@ -286,56 +305,56 @@ export const initLedgerDatabase = () => {
           return null;
         }
       };
-      
-      // Set (insert or update) a nickname for a contact
-      export const setContactNickname = (contactRecordId, nickname) => {
+
+      // Set (insert or update) a display name for a contact
+      export const setContactName = (contactRecordId, displayName) => {
         try {
           const db = getDB();
           const timestamp = Date.now();
           db.execute(
-            `INSERT OR REPLACE INTO contact_nicknames (contact_record_id, nickname, created_at, updated_at)
-             VALUES (?, ?, COALESCE((SELECT created_at FROM contact_nicknames WHERE contact_record_id = ?), ?), ?)`,
-            [String(contactRecordId), nickname, String(contactRecordId), timestamp, timestamp]
+            `INSERT OR REPLACE INTO contact_names (contact_record_id, display_name, created_at, updated_at)
+             VALUES (?, ?, COALESCE((SELECT created_at FROM contact_names WHERE contact_record_id = ?), ?), ?)`,
+            [String(contactRecordId), displayName, String(contactRecordId), timestamp, timestamp]
           );
-          console.log(`Nickname set for contact ${contactRecordId}: ${nickname}`);
+          console.log(`Contact name set for contact ${contactRecordId}: ${displayName}`);
           return {success: true};
         } catch (error) {
-          console.error(`Failed to set nickname for contact ${contactRecordId}:`, error);
+          console.error(`Failed to set contact name for contact ${contactRecordId}:`, error);
           throw error;
         }
       };
-      
-      // Get a nickname for a contact
-      export const getContactNickname = contactRecordId => {
+
+      // Get a display name for a contact
+      export const getContactName = contactRecordId => {
         try {
           const db = getDB();
           const result = db.execute(
-            'SELECT nickname FROM contact_nicknames WHERE contact_record_id = ?',
+            'SELECT display_name FROM contact_names WHERE contact_record_id = ?',
             [String(contactRecordId)]
           );
           const rows = result.rows?._array || [];
-          return rows.length > 0 ? rows[0].nickname : null;
+          return rows.length > 0 ? rows[0].display_name : null;
         } catch (error) {
-          console.error(`Failed to get nickname for contact ${contactRecordId}:`, error);
+          console.error(`Failed to get contact name for contact ${contactRecordId}:`, error);
           return null;
         }
       };
-      
-      // Delete a nickname for a contact
-      export const deleteContactNickname = contactRecordId => {
+
+      // Delete a contact name
+      export const deleteContactName = contactRecordId => {
         try {
           const db = getDB();
-          db.execute('DELETE FROM contact_nicknames WHERE contact_record_id = ?', [
+          db.execute('DELETE FROM contact_names WHERE contact_record_id = ?', [
             String(contactRecordId),
           ]);
-          console.log(`Nickname deleted for contact ${contactRecordId}.`);
+          console.log(`Contact name deleted for contact ${contactRecordId}.`);
           return {success: true};
         } catch (error) {
-          console.error(`Failed to delete nickname for contact ${contactRecordId}:`, error);
+          console.error(`Failed to delete contact name for contact ${contactRecordId}:`, error);
           throw error;
         }
       };
-      
+
       // Get total statistics (optional - for dashboard/reports)
       export const getLedgerStatistics = () => {
         try {
@@ -426,65 +445,15 @@ export const initLedgerDatabase = () => {
           return [];
         }
       };
-
-      /**
-       * Get unified timeline: transactions + messages merged chronologically
-       * @param {string} contactRecordId - The ledger contact ID
-       * @param {array} messages - Chat messages for this contact (from chatDatabase)
-       * @param {number} limit - Number of items to load (default 50)
-       * @param {number} offset - Pagination offset (default 0)
-       * @returns {array} Merged timeline items sorted by timestamp (descending)
-       */
-      export const getUnifiedTimeline = (contactRecordId, messages = [], limit = 50, offset = 0) => {
-        try {
-          const db = getDB();
-
-          // Get transactions for this contact
-          const result = db.execute(`
-            SELECT id, contact_record_id, amount, type, note, transaction_date, created_at
-            FROM ledger_transactions
-            WHERE contact_record_id = ?
-            ORDER BY transaction_date DESC
-          `, [String(contactRecordId)]);
-
-          const transactionRows = result.rows?._array || [];
-
-          // Create transaction items with type field
-          const transactionItems = transactionRows.map(transaction => ({
-            id: `txn_${transaction.id}`,
-            type: 'transaction',
-            timestamp: transaction.transaction_date,
-            amount: transaction.amount,
-            transactionType: transaction.type, // 'paid' or 'get'
-            note: transaction.note || '',
-            contactRecordId: transaction.contact_record_id,
-          }));
-
-          // Create message items with type field
-          const messageItems = (messages || []).map(message => ({
-            id: `msg_${message.message_id || message.id}`,
-            type: 'message',
-            timestamp: message.timestamp,
-            text: message.message_text || message.text || '',
-            senderId: message.sender_id || message.senderId || '',
-            receiverId: message.receiver_id || message.receiverId || '',
-            deliveryStatus: message.delivery_status || message.deliveryStatus || 'sent',
-            isRead: message.is_read || message.isRead || false,
-          }));
-
-          // Merge arrays
-          const merged = [...transactionItems, ...messageItems];
-
-          // Sort by timestamp descending (newest first - for inverted list)
-          merged.sort((a, b) => b.timestamp - a.timestamp);
-
-          // Apply pagination
-          const paginated = merged.slice(offset, offset + limit);
-
-          return paginated;
-        } catch (error) {
-          console.error('Failed to get unified timeline:', error);
-          return [];
-        }
-      };
       
+
+
+
+
+
+
+
+
+
+
+

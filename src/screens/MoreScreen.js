@@ -17,6 +17,7 @@ import {
   BackHandler,
   TextInput,
   NativeModules,
+  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import ImagePicker from 'react-native-image-crop-picker';
@@ -29,6 +30,8 @@ import {clearAllAccountsData} from '../services/accountsDatabase';
 import {clearAllLedgerData} from '../services/ledgerDatabase';
 import {queueBackupFromStorage} from '../utils/backupQueue';
 import BottomSheet from '../components/BottomSheet';
+import CollapsibleSection from '../components/CollapsibleSection';
+import CollapsibleMenuItem from '../components/CollapsibleMenuItem';
 import {updateProfile} from '../services/api';
 import {useToast} from '../hooks/useToast';
 
@@ -629,48 +632,103 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
 
   const menuItems = [
     {
-      id: 'backup',
-      title: 'Backup & Restore',
-      icon: 'cloud-upload-outline',
-      onPress: () => {
-        slideInDirectionRef.current = 'left';
-        navigation.navigate('Backup');
-      },
-    },
-    {
       id: 'settings',
       title: 'Settings',
       icon: 'settings-outline',
+      type: 'direct',
       onPress: () => {
         skipNextSlideInRef.current = true;
         navigation.navigate('Settings');
       },
     },
     {
-      id: 'notification-settings',
-      title: 'Notification Settings',
-      icon: 'notifications-outline',
+      id: 'backup',
+      title: 'Backup & Restore',
+      icon: 'cloud-upload-outline',
+      type: 'direct',
       onPress: () => {
-        skipNextSlideInRef.current = true;
-        navigation.navigate('NotificationSettings');
+        slideInDirectionRef.current = 'left';
+        navigation.navigate('Backup');
       },
     },
+    // {
+    //   id: 'notification-settings',
+    //   title: 'Notification Settings',
+    //   icon: 'notifications-outline',
+    //   type: 'direct',
+    //   onPress: () => {
+    //     skipNextSlideInRef.current = true;
+    //     navigation.navigate('NotificationSettings');
+    //   },
+    // },
     {
       id: 'help',
       title: 'Help & Support',
       icon: 'help-circle-outline',
-      onPress: () =>
-        Alert.alert('Coming Soon', 'Help & Support feature coming soon'),
+      type: 'collapsible',
+      subItems: [
+        {
+          id: 'faqs',
+          title: 'FAQs',
+          onPress: () => {
+            navigation.navigate('FAQs');
+          },
+        },
+        {
+          id: 'help-whatsapp',
+          title: 'Help on WhatsApp',
+          onPress: () => {
+            const phoneNumber = '9356393094';
+            const message = 'Hello, I would like to learn about Savingo.';
+            const whatsappURL = `whatsapp://send?phone=91${phoneNumber}&text=${encodeURIComponent(message)}`;
+            Linking.openURL(whatsappURL).catch(err =>
+              Alert.alert('Error', 'WhatsApp is not installed on your device.'),
+            );
+          },
+        },
+        {
+          id: 'call-us',
+          title: 'Call Us',
+          onPress: () => {
+            Linking.openURL('tel:9356393094').catch(err =>
+              Alert.alert('Error', 'Unable to make call.'),
+            );
+          },
+        },
+      ],
     },
     {
       id: 'about',
-      title: 'About',
+      title: 'About Us',
       icon: 'information-circle-outline',
-      onPress: () => {
-        const versionName = NativeModules?.VersionInfo?.versionName ?? 'unknown';
-        const versionCode = NativeModules?.VersionInfo?.versionCode ?? 'unknown';
-        Alert.alert('Savingo', `Version ${versionName} (${versionCode})`);
-      },
+      type: 'collapsible',
+      subItems: [
+        {
+          id: 'about-app',
+          title: 'About App',
+          onPress: () => {
+            const versionName = NativeModules?.VersionInfo?.versionName ?? 'unknown';
+            const versionCode = NativeModules?.VersionInfo?.versionCode ?? 'unknown';
+            Alert.alert('Savingo', `Version ${versionName} (${versionCode})`);
+          },
+        },
+        {
+          id: 'privacy-policy',
+          title: 'Privacy Policy',
+          onPress: () => {
+            Linking.openURL('https://www.merasoftware.com/mysavings-privacy-policy').catch(err =>
+              Alert.alert('Error', 'Unable to open link. Please try again.'),
+            );
+          },
+        },
+        {
+          id: 'terms-conditions',
+          title: 'Terms & Conditions',
+          onPress: () => {
+            Alert.alert('Terms & Conditions', 'Terms & Conditions link will be added here');
+          },
+        },
+      ],
     },
   ];
 
@@ -773,23 +831,46 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
           </TouchableOpacity>
 
           <View style={styles.menuSection}>
-            {menuItems.map(item => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuItem}
-                onPress={item.onPress}>
-                <Icon name={item.icon} size={24} color={colors.text.primary} />
-                <Text style={styles.menuText}>{item.title}</Text>
-                {item.subtitle && (
-                  <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-                )}
-                <Icon
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.text.light}
-                />
-              </TouchableOpacity>
-            ))}
+            {menuItems.map(item => {
+              if (item.type === 'collapsible') {
+                return (
+                  <CollapsibleSection
+                    key={item.id}
+                    title={item.title}
+                    icon={item.icon}
+                    initialExpanded={false}>
+                    <View>
+                      {item.subItems?.map((subItem, index) => (
+                        <CollapsibleMenuItem
+                          key={subItem.id}
+                          title={subItem.title}
+                          onPress={subItem.onPress}
+                        />
+                      ))}
+                    </View>
+                  </CollapsibleSection>
+                );
+              }
+
+              // Direct menu item
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.directMenuItem}
+                  onPress={item.onPress}
+                  activeOpacity={0.7}>
+                  <View style={styles.menuIconContainer}>
+                    <Icon name={item.icon} size={24} color={colors.primary} />
+                  </View>
+                  <Text style={styles.menuText}>{item.title}</Text>
+                  <Icon
+                    name="chevron-forward"
+                    size={20}
+                    color={colors.text.light}
+                  />
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -1073,21 +1154,31 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   menuSection: {
-    backgroundColor: colors.white,
     marginBottom: spacing.md,
   },
-  menuItem: {
+  directMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.sm,
+    borderRadius: 8,
+  },
+  menuIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
   },
   menuText: {
     flex: 1,
     fontSize: fontSize.regular,
+    fontWeight: fontWeight.medium,
     color: colors.text.primary,
-    marginLeft: spacing.md,
   },
   menuSubtitle: {
     fontSize: fontSize.regular,

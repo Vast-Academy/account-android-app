@@ -5,20 +5,17 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   FlatList,
-  PermissionsAndroid,
   Platform,
   Modal,
   TextInput,
-  ActivityIndicator,
   Alert,
-  Linking,
   Animated,
-  Easing,
+  DeviceEventEmitter,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons'; // For push-pin icon
-import Contacts from 'react-native-contacts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
@@ -29,13 +26,11 @@ import {
   getAllContactBalances,
   getLedgerStatistics,
   deleteContactAndTransactions,
-  setContactNickname,
-  getContactNickname,
-  deleteContactNickname,
+  setContactName,
+  getContactName,
   getLatestTransactionDateByContact,
   getDistinctContactRecordIds,
 } from '../services/ledgerDatabase';
-import {matchContactsWithAppUsers} from '../services/contactMatchingService';
 
 const CONTACTS_STORAGE_KEY = 'ledgerContacts';
 const PINNED_CONTACT_IDS_STORAGE_KEY = 'pinnedLedgerContactIds';
@@ -46,10 +41,6 @@ const LedgerScreen = ({navigation}) => {
   const currencySymbol = useCurrencySymbol();
   const [contacts, setContacts] = useState([]);
   const [contactsHydrated, setContactsHydrated] = useState(false);
-  const [contactOptions, setContactOptions] = useState([]);
-  const [loadingContacts, setLoadingContacts] = useState(false);
-  const [contactsModalVisible, setContactsModalVisible] = useState(false);
-  const [contactSearch, setContactSearch] = useState('');
   const [contactBalances, setContactBalances] = useState({});
   const [overallBalance, setOverallBalance] = useState({
     totalPaid: 0,
@@ -58,8 +49,6 @@ const LedgerScreen = ({navigation}) => {
   });
   const [latestTransactionDates, setLatestTransactionDates] = useState({});
   const [dbContactIds, setDbContactIds] = useState([]);
-  const slideAnim = useRef(new Animated.Value(0)).current;
-  const contactsFetchInFlight = useRef(false);
 
   // For context menu
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
@@ -70,8 +59,18 @@ const LedgerScreen = ({navigation}) => {
 
   // For rename modal
   const [renameModalVisible, setRenameModalVisible] = useState(false);
-  const [newNickname, setNewNickname] = useState('');
+  const [newName, setNewName] = useState('');
+  const [renameContact, setRenameContact] = useState(null);
   const [originalContactName, setOriginalContactName] = useState('');
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('ledger:addContact', (contact) => {
+      handleAddContact(contact);
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [handleAddContact]);
 
 
   useEffect(() => {
@@ -134,20 +133,28 @@ const LedgerScreen = ({navigation}) => {
           };
         });
 
-        // Fetch nicknames for reconciled contacts
-        const contactsWithNicknames = await Promise.all(
+        // Fetch Names for reconciled contacts
+        const contactsWithNames = await Promise.all(
           reconciledContacts.map(async contact => {
-            const nickname = await getContactNickname(contact.recordID);
-            return {...contact, nickname: nickname || null};
+            const savedName = await getContactName(contact.recordID);
+            if (savedName) {
+              return {...contact, savedName};
+            }
+            const deviceName = getContactNameFromDevice(contact);
+            if (deviceName) {
+              await setContactName(contact.recordID, deviceName);
+              return {...contact, savedName: deviceName};
+            }
+            return {...contact, savedName: null};
           }),
         );
-        setContacts(contactsWithNicknames);
+        setContacts(contactsWithNames);
         const storedPinned = await AsyncStorage.getItem(PINNED_CONTACT_IDS_STORAGE_KEY);
         if (storedPinned) {
           const parsedPinned = JSON.parse(storedPinned);
           if (Array.isArray(parsedPinned)) {
             const reconciledIds = new Set(
-              contactsWithNicknames.map(contact => String(contact.recordID)),
+              contactsWithNames.map(contact => String(contact.recordID)),
             );
             setPinnedContactIds(
               parsedPinned.filter(id => reconciledIds.has(String(id))),
@@ -165,27 +172,13 @@ const LedgerScreen = ({navigation}) => {
     loadStoredData();
   }, []);
 
-  useEffect(() => {
-    const loadCachedDeviceContacts = async () => {
-      try {
-        const cached = await AsyncStorage.getItem(DEVICE_CONTACTS_CACHE_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setContactOptions(parsed);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load cached device contacts:', error);
-      }
-    };
-    loadCachedDeviceContacts();
-  }, []);
+
+
 
   const getContactDisplayName = useCallback(async (contact) => {
-    const nickname = await getContactNickname(contact.recordID);
-    if (nickname) {
-        return nickname;
+    const savedName = await getContactName(contact.recordID);
+    if (savedName) {
+        return savedName;
     }
     const fullName = [contact.givenName, contact.familyName]
       .filter(Boolean)
@@ -199,23 +192,7 @@ const LedgerScreen = ({navigation}) => {
       await loadBalances();
     });
     return unsubscribe;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigation]);
-
-  const matchAppUsers = async (forceRefresh = false) => {
-    if (!contactsHydrated || contacts.length === 0) {
-      return;
-    }
-
-    try {
-      const enrichedContacts = await matchContactsWithAppUsers(contacts, forceRefresh);
-      setContacts(current =>
-        sortContactsByPinned(enrichedContacts, pinnedContactIds, latestTransactionDates)
-      );
-    } catch (error) {
-      console.error('Error matching app users:', error);
-    }
-  };
+  }, [navigation, contacts, getContactDisplayName]); // Add getContactDisplayName to dependencies
 
   const loadBalances = useCallback(async (contactsOverride) => {
     const baseContacts = contactsOverride || contacts;
@@ -226,15 +203,15 @@ const LedgerScreen = ({navigation}) => {
     const latestDates = getLatestTransactionDateByContact();
     setLatestTransactionDates(latestDates);
   
-    // Fetch nicknames for current contacts to ensure display names are updated
-    const contactsWithUpdatedNicknames = await Promise.all(
+    // Fetch Names for current contacts to ensure display names are updated
+    const contactsWithUpdatedNames = await Promise.all(
       baseContacts.map(async (contact) => {
-        const nickname = await getContactNickname(contact.recordID);
-        return { ...contact, nickname: nickname || null };
+        const savedName = await getContactName(contact.recordID);
+        return { ...contact, savedName: savedName || null };
       })
     );
     setContacts(current =>
-      sortContactsByPinned(contactsWithUpdatedNicknames, pinnedContactIds, latestDates)
+      sortContactsByPinned(contactsWithUpdatedNames, pinnedContactIds, latestDates)
     );
   }, [contacts, pinnedContactIds]); // Add contacts to dependencies
 
@@ -252,7 +229,7 @@ const LedgerScreen = ({navigation}) => {
             givenName: contact.givenName || '',
             familyName: contact.familyName || '',
             phoneNumbers: phone ? [{number: phone}] : [],
-            // Do not persist nickname, it's stored in DB
+            // Do not persist savedName, it's stored in DB
           };
         });
         await AsyncStorage.setItem(
@@ -296,57 +273,7 @@ const LedgerScreen = ({navigation}) => {
   }, [pinnedContactIds, contactsHydrated, latestTransactionDates]);
 
 
-  useEffect(() => {
-    if (contactsModalVisible) {
-      slideAnim.setValue(0);
-      Animated.timing(slideAnim, {
-        toValue: 1,
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-    } else {
-      slideAnim.setValue(0);
-    }
-  }, [contactsModalVisible, slideAnim]);
 
-  const requestContactsPermission = async () => {
-    if (Platform.OS === 'android') {
-      const alreadyGranted = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.READ_CONTACTS
-      );
-      if (alreadyGranted) {
-        return true;
-      }
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
-        {
-          title: 'Contacts Permission',
-          message: 'Allow access to your contacts to add people to ledger.',
-          buttonPositive: 'Allow',
-          buttonNegative: 'Cancel',
-        }
-      );
-      if (result === PermissionsAndroid.RESULTS.GRANTED) {
-        return true;
-      }
-      if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
-        Alert.alert(
-          'Permission Blocked',
-          'Please enable contacts access in Settings.',
-          [
-            {text: 'Cancel', style: 'cancel'},
-            {text: 'Open Settings', onPress: () => Linking.openSettings()},
-          ]
-        );
-        return false;
-      }
-      return false;
-    }
-
-    const permission = await Contacts.requestPermission();
-    return permission === 'authorized';
-  };
 
   const getContactNameFromDevice = contact => {
     const fullName = [contact.givenName, contact.familyName]
@@ -356,98 +283,33 @@ const LedgerScreen = ({navigation}) => {
     return fullName || contact.displayName || 'Unnamed Contact';
   };
 
-  const getContactPhone = contact => {
-    const phone = contact.phoneNumbers?.find(item =>
-      String(item.number || '').trim()
-    )?.number;
-    return phone || 'No phone number';
-  };
 
-  const isContactAdded = contact =>
-    contacts.some(item => item.recordID === contact.recordID);
 
-  const normalizeDeviceContacts = contactsList =>
-    contactsList.map(contact => ({
-      recordID: contact.recordID,
-      displayName: contact.displayName || '',
-      givenName: contact.givenName || '',
-      familyName: contact.familyName || '',
-      phoneNumbers: (contact.phoneNumbers || [])
-        .map(item => ({number: item.number}))
-        .filter(item => String(item.number || '').trim()),
-    }));
 
-  const loadDeviceContacts = async ({showLoading = true} = {}) => {
-    if (contactsFetchInFlight.current) {
-      return;
-    }
-    contactsFetchInFlight.current = true;
-    if (showLoading) {
-      setLoadingContacts(true);
-    }
-    try {
-      const granted = await requestContactsPermission();
-      if (!granted) {
-        if (showLoading) {
-          Alert.alert('Permission Required', 'Please allow contacts access.');
-          setContactsModalVisible(false);
-        }
-        return;
-      }
-      const fetcher = Contacts.getAllWithoutPhotos || Contacts.getAll;
-      const list = await fetcher();
-      const filtered = list.filter(contact => {
-        const hasPhone = contact.phoneNumbers?.some(item =>
-          String(item.number || '').trim()
-        );
-        const hasName = [contact.displayName, contact.givenName, contact.familyName]
-          .some(value => String(value || '').trim());
-        return hasPhone && hasName;
-      });
-      const sorted = filtered.sort((a, b) =>
-        getContactNameFromDevice(a).localeCompare(getContactNameFromDevice(b))
-      );
-      const normalized = normalizeDeviceContacts(sorted);
-      setContactOptions(normalized);
-      await AsyncStorage.setItem(
-        DEVICE_CONTACTS_CACHE_KEY,
-        JSON.stringify(normalized)
-      );
-    } catch (error) {
-      console.error('Failed to load contacts:', error);
-      Alert.alert('Error', 'Failed to load contacts.');
-    } finally {
-      contactsFetchInFlight.current = false;
-      if (showLoading) {
-        setLoadingContacts(false);
-      }
-    }
-  };
 
-  const openContactsModal = () => {
-    setContactsModalVisible(true);
-    setContactSearch('');
-    if (contactOptions.length === 0) {
-      loadDeviceContacts();
-    }
-  };
 
-  const closeContactsModal = () => {
-    setContactsModalVisible(false);
-  };
+
+
+
+
 
   const handleAddContact = async contact => {
-    const nickname = await getContactNickname(contact.recordID);
-    const contactWithNickname = { ...contact, nickname: nickname || null };
+    const existingName = await getContactName(contact.recordID);
+    const displayName = existingName || getContactNameFromDevice(contact);
+
+    if (!existingName && displayName) {
+      await setContactName(contact.recordID, displayName);
+    }
+
+    const contactWithName = { ...contact, savedName: displayName || null };
 
     setContacts(prev => {
       if (prev.some(item => item.recordID === contact.recordID)) {
         return prev;
       }
-      const next = [...prev, contactWithNickname];
+      const next = [...prev, contactWithName];
       return sortContactsByPinned(next, pinnedContactIds, latestTransactionDates);
     });
-    setContactsModalVisible(false);
     showToast('Contact added successfully', 'success');
   };
 
@@ -462,7 +324,7 @@ const LedgerScreen = ({navigation}) => {
     return formatCurrency(amount);
   };
 
-  // Helper function for sorting contacts by pinned status and app user status
+  // Helper function for sorting contacts by pinned status
   const sortContactsByPinned = (contactsList, pinnedIds, latestDates = {}) => {
     if (!contactsList || contactsList.length === 0) {
       return [];
@@ -476,20 +338,12 @@ const LedgerScreen = ({navigation}) => {
     const unpinned = contactsList.filter(contact => !pinnedOrder.has(contact.recordID));
 
     pinned.sort((a, b) => pinnedOrder.get(a.recordID) - pinnedOrder.get(b.recordID));
-
-    // Sort unpinned contacts: App users first, then by latest transaction date
+    // Sort unpinned contacts by latest transaction date (newest first)
     unpinned.sort((a, b) => {
-      // App users come first
-      const aIsAppUser = a.isAppUser ? 1 : 0;
-      const bIsAppUser = b.isAppUser ? 1 : 0;
-      if (aIsAppUser !== bIsAppUser) {
-        return bIsAppUser - aIsAppUser; // App users (1) before non-app users (0)
-      }
-
-      // Within same group, sort by latest transaction date (newest first)
-      const dateA = latestDates[a.recordID] || 0;
-      const dateB = latestDates[b.recordID] || 0;
-      return dateB - dateA;
+        const dateA = latestDates[a.recordID] || 0;
+        const dateB = latestDates[b.recordID] || 0;
+        // Descending order: most recent first
+        return dateB - dateA;
     });
 
     return [...pinned, ...unpinned];
@@ -539,7 +393,7 @@ const LedgerScreen = ({navigation}) => {
     }
     Alert.alert(
       'Delete Contact',
-      `Are you sure you want to delete ${selectedContact.nickname || getContactNameFromDevice(selectedContact)} and all its transactions? This action cannot be undone.`,
+      `Are you sure you want to delete ${selectedContact.savedName || getContactNameFromDevice(selectedContact)} and all its transactions? This action cannot be undone.`,
       [
         {text: 'Cancel', style: 'cancel'},
         {
@@ -573,34 +427,36 @@ const LedgerScreen = ({navigation}) => {
     if (!selectedContact) {
       return;
     }
-    const currentNickname = await getContactNickname(selectedContact.recordID);
-    setNewNickname(currentNickname || getContactNameFromDevice(selectedContact));
+    setRenameContact(selectedContact);
+    const currentName = await getContactName(selectedContact.recordID);
+    setNewName(currentName || getContactNameFromDevice(selectedContact));
     setRenameModalVisible(true);
     closeContextMenu(); // Close context menu when rename modal opens
   };
 
   const closeRenameModal = () => {
     setRenameModalVisible(false);
-    setNewNickname('');
+    setNewName('');
+    setRenameContact(null);
   };
 
-  const handleSaveNickname = async () => {
-    if (!selectedContact || !newNickname.trim()) {
-      Alert.alert('Invalid Name', 'Nickname cannot be empty.');
+  const handleSaveName = async () => {
+    if (!renameContact || !newName.trim()) {
+      Alert.alert('Invalid Name', 'Name cannot be empty.');
       return;
     }
     try {
-      await setContactNickname(selectedContact.recordID, newNickname.trim());
-      // Update the nickname in the local contacts state
+      await setContactName(renameContact.recordID, newName.trim());
+      // Update the savedName in the local contacts state
       setContacts(prev => prev.map(c => 
-        c.recordID === selectedContact.recordID ? { ...c, nickname: newNickname.trim() } : c
+        c.recordID === renameContact.recordID ? { ...c, savedName: newName.trim() } : c
       ));
       await loadBalances(); // Refresh balances and stats
       closeRenameModal();
       Alert.alert('Success', 'Contact renamed successfully.');
     } catch (error) {
-      console.error('Failed to save nickname:', error);
-      Alert.alert('Error', 'Failed to save nickname.');
+      console.error('Failed to save name:', error);
+      Alert.alert('Error', 'Failed to save name.');
     }
   };
 
@@ -619,45 +475,39 @@ const LedgerScreen = ({navigation}) => {
     closeContextMenu();
   };
 
-  const normalizedSearch = contactSearch.trim().toLowerCase();
-  const filteredContactOptions = normalizedSearch
-    ? contactOptions.filter(item => {
-        const name = item.nickname || getContactNameFromDevice(item);
-        const phone = getContactPhone(item);
-        return name.toLowerCase().includes(normalizedSearch) || phone.includes(normalizedSearch);
-      })
-    : contactOptions;
 
   const renderContact = ({item, index}) => {
-    const name = item.nickname || getContactNameFromDevice(item);
+    const name = item.savedName || getContactNameFromDevice(item);
     const balance = contactBalances[item.recordID] || {
       netBalance: 0,
     };
-
+  
     const balanceStatus =
       balance.netBalance > 0
         ? 'positive'
         : balance.netBalance < 0
         ? 'negative'
         : 'neutral';
-
+  
     const statusText =
       balanceStatus === 'positive'
         ? 'You will get'
         : balanceStatus === 'negative'
         ? 'You will give'
         : 'Settled';
-
+  
     const isPinned = pinnedContactIds.includes(item.recordID);
-    const isAppUser = item.isAppUser;
-    const username = item.username;
 
     return (
-      <TouchableOpacity
-        style={[styles.contactItem, index === contacts.length - 1 && styles.lastContactItem]}
+      <Pressable
         onPress={() => navigation.navigate('LedgerContactDetail', {contact: item})}
         onLongPress={() => openContextMenu(item)}
-        activeOpacity={0.8}>
+        android_ripple={{color: 'rgba(0,0,0,0.06)'}}
+        style={({pressed}) => [
+          styles.contactItem,
+          index === contacts.length - 1 && styles.lastContactItem,
+          pressed && styles.rowPressed,
+        ]}>
         <View style={styles.contactRow}>
           <View style={styles.contactAvatar}>
             <Text style={styles.contactAvatarText}>
@@ -668,32 +518,14 @@ const LedgerScreen = ({navigation}) => {
                 <MaterialIcon name="push-pin" size={12} color={colors.white} />
               </View>
             )}
-            {isAppUser && (
-              <View style={styles.appUserBadge}>
-                <Icon name="checkmark-circle" size={14} color={colors.success} />
-              </View>
-            )}
           </View>
           <View style={styles.contactDetails}>
-            <View style={styles.contactHeaderRow}>
-              <Text style={styles.contactName} numberOfLines={1}>
-                {name}
-              </Text>
-              {isAppUser && (
-                <View style={styles.savingoUserBadge}>
-                  <Text style={styles.savingoUserBadgeText}>Savingo User</Text>
-                </View>
-              )}
-            </View>
-            {isAppUser && username ? (
-              <Text style={styles.contactUsername} numberOfLines={1}>
-                @{username}
-              </Text>
-            ) : (
-              <Text style={[styles.balanceText, styles[`balance_${balanceStatus}`]]}>
-                {statusText}
-              </Text>
-            )}
+            <Text style={styles.contactName} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={[styles.balanceText, styles[`balance_${balanceStatus}`]]}>
+              {statusText}
+            </Text>
           </View>
           <View style={styles.balanceInfo}>
             <Text style={[styles.balanceAmount, styles[`balance_${balanceStatus}`]]}>
@@ -701,41 +533,7 @@ const LedgerScreen = ({navigation}) => {
             </Text>
           </View>
         </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderContactOption = ({item}) => {
-    const name = item.nickname || getContactNameFromDevice(item);
-    const phone = getContactPhone(item);
-    const added = isContactAdded(item);
-    return (
-      <TouchableOpacity
-        style={[styles.modalContactRow, added && styles.contactRowDisabled]}
-        onPress={() => handleAddContact(item)}
-        disabled={added}
-        activeOpacity={0.7}>
-        <View style={[styles.contactAvatar, styles.modalContactAvatar]}>
-          <Text style={styles.contactAvatarText}>
-            {(name || '?').charAt(0).toUpperCase()}
-          </Text>
-        </View>
-        <View style={styles.modalContactDetails}>
-          <Text style={styles.contactName} numberOfLines={1}>
-            {name || 'Unnamed Contact'}
-          </Text>
-          <Text style={styles.contactPhone} numberOfLines={1}>
-            {phone}
-          </Text>
-        </View>
-        <View style={styles.contactAction}>
-          {added ? (
-            <Text style={styles.contactAddedText}>Added</Text>
-          ) : (
-            <Icon name="add-circle-outline" size={20} color={colors.primary} />
-          )}
-        </View>
-      </TouchableOpacity>
+      </Pressable>
     );
   };
 
@@ -812,83 +610,10 @@ const LedgerScreen = ({navigation}) => {
         </View>
       </ScrollView>
 
-      <Modal
-        visible={contactsModalVisible}
-        transparent
-        animationType="none"
-        onRequestClose={closeContactsModal}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={closeContactsModal}
-          />
-          <Animated.View
-            style={[
-              styles.modalCard,
-              {
-                transform: [
-                  {
-                    translateY: slideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [320, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Contact</Text>
-              <TouchableOpacity
-                style={styles.modalClose}
-                onPress={closeContactsModal}>
-                <Icon name="close" size={18} color={colors.text.secondary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.modalSearch}>
-              <Icon name="search" size={18} color={colors.text.secondary} />
-              <TextInput
-                style={styles.modalSearchInput}
-                value={contactSearch}
-                onChangeText={setContactSearch}
-                placeholder="Search by name or number"
-                placeholderTextColor={colors.text.light}
-                autoCorrect={false}
-                autoCapitalize="none"
-              />
-            </View>
-            {loadingContacts ? (
-              <View style={styles.modalLoading}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={styles.loadingText}>Loading contacts...</Text>
-              </View>
-            ) : filteredContactOptions.length > 0 ? (
-              <FlatList
-                data={filteredContactOptions}
-                keyExtractor={item => String(item.recordID)}
-                renderItem={renderContactOption}
-                contentContainerStyle={styles.modalList}
-              />
-            ) : (
-              <View style={styles.modalEmpty}>
-                <Icon name="people-outline" size={48} color={colors.text.light} />
-                <Text style={styles.modalEmptyText}>
-                  {normalizedSearch ? 'No matches found' : 'No contacts found'}
-                </Text>
-                <Text style={styles.modalEmptySubtext}>
-                  {normalizedSearch
-                    ? 'Try a different name or number'
-                    : 'Try again or check contacts permission'}
-                </Text>
-              </View>
-            )}
-          </Animated.View>
-        </View>
-      </Modal>
 
-      <TouchableOpacity style={styles.fab} onPress={openContactsModal}>
+      <Pressable onPress={() => navigation.navigate('LedgerAddContact')} android_ripple={{color: 'rgba(255,255,255,0.2)'}} style={({pressed}) => [styles.fab, pressed && styles.fabPressed]}>
         <Icon name="person-add" size={22} color={colors.white} />
-      </TouchableOpacity>
+      </Pressable>
 
       {/* Context Menu Modal */}
       <Modal
@@ -968,12 +693,12 @@ const LedgerScreen = ({navigation}) => {
           />
           <View style={styles.renameModalContainer}>
             <Text style={styles.renameModalTitle}>Rename Contact</Text>
-            <Text style={styles.renameModalLabel}>Nickname</Text>
+            <Text style={styles.renameModalLabel}>Name</Text>
             <TextInput
               style={styles.renameModalInput}
-              value={newNickname}
-              onChangeText={setNewNickname}
-              placeholder="Enter new nickname"
+              value={newName}
+              onChangeText={setNewName}
+              placeholder="Enter new name"
               placeholderTextColor={colors.text.light}
               autoFocus
             />
@@ -985,7 +710,7 @@ const LedgerScreen = ({navigation}) => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.renameModalButton, styles.renameModalSaveButton]}
-                onPress={handleSaveNickname}>
+                onPress={handleSaveName}>
                 <Text style={styles.renameModalButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -1073,6 +798,9 @@ const styles = StyleSheet.create({
     ...cardBase,
     overflow: 'hidden',
   },
+  rowPressed: {
+    backgroundColor: '#F1F5F9',
+  },
   contactItem: {
     padding: 14,
     borderBottomWidth: 1,
@@ -1108,43 +836,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 2,
   },
-  appUserBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: colors.white,
-    borderRadius: 8,
-    padding: 1,
-  },
   contactDetails: {
     flex: 1,
     minWidth: 0,
-  },
-  contactHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   contactName: {
     fontSize: 16,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
-  },
-  savingoUserBadge: {
-    backgroundColor: '#E0F2FE',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  savingoUserBadgeText: {
-    fontSize: 11,
-    fontWeight: fontWeight.semibold,
-    color: colors.primary,
-  },
-  contactUsername: {
-    fontSize: 13,
-    color: colors.text.secondary,
-    marginTop: 2,
+    marginBottom: 4,
   },
   contactPhone: {
     fontSize: 13,
@@ -1187,6 +887,9 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: 4,
     textAlign: 'center',
+  },
+  fabPressed: {
+    transform: [{scale: 0.98}],
   },
   fab: {
     position: 'absolute',
@@ -1316,6 +1019,15 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.white,
   },
+  // Overriding button text color for cancel
+  renameModalCancelButton: {
+    backgroundColor: '#E5E7EB',
+  },
+  renameModalButtonText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.bold,
+    color: colors.white,
+  },
   renameModalCancelButtonText: {
     fontSize: fontSize.medium,
     fontWeight: fontWeight.bold,
@@ -1331,86 +1043,25 @@ const styles = StyleSheet.create({
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
   },
-  modalCard: { // This refers to the "Select Contact" modal itself
-    width: '100%',
-    maxHeight: '75%',
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: spacing.md,
-    elevation: 10,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
-  modalTitle: {
-    fontSize: fontSize.large,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.primary,
-  },
-  modalClose: {
-    padding: 4,
-  },
-  modalSearch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    marginBottom: spacing.sm,
-  },
-  modalSearchInput: {
-    flex: 1,
-    marginLeft: spacing.sm,
-    fontSize: fontSize.regular,
-    color: colors.text.primary,
-    paddingVertical: 4,
-  },
-  modalList: {
-    paddingBottom: spacing.sm,
-  },
-  modalContactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  modalContactAvatar: {
-    marginRight: spacing.md,
-  },
-  modalContactDetails: {
-    flex: 1,
-    minWidth: 0,
-  },
-  contactRowDisabled: {
-    opacity: 0.6,
-  },
-  contactAddedText: {
-    fontSize: fontSize.small,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.secondary,
-  },
-  modalEmpty: {
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
-  },
-  modalEmptyText: {
-    fontSize: fontSize.medium,
-    fontWeight: fontWeight.semibold,
-    color: colors.text.primary,
-    marginTop: spacing.sm,
-  },
-  modalEmptySubtext: {
-    fontSize: fontSize.small,
-    color: colors.text.secondary,
-    marginTop: 4,
-  },
 });
 
 export default LedgerScreen;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

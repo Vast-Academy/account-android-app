@@ -11,13 +11,12 @@ import AmountEntryScreen from '../screens/AmountEntryScreen';
 import AddAccountScreen from '../screens/AddAccountScreen';
 import PersonalizeAccountScreen from '../screens/PersonalizeAccountScreen';
 import LedgerContactDetailScreen from '../screens/LedgerContactDetailScreen';
+import LedgerAddContactScreen from '../screens/LedgerAddContactScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BackupScreen from '../screens/BackupScreen';
 import CurrencySetupScreen from '../screens/CurrencySetupScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
 import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
-import UserSearchScreen from '../screens/UserSearchScreen';
-import ChatConversationScreen from '../screens/ChatConversationScreen';
 
 const Stack = createStackNavigator();
 
@@ -28,9 +27,8 @@ const AppNavigator = () => {
         initialRouteName="Splash"
         screenOptions={{
           headerShown: false,
-          cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
-          gestureDirection: 'horizontal',
-          gestureResponseDistance: 20,
+          detachInactiveScreens: true,
+          animation: 'slide_from_right',
         }}>
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
@@ -41,13 +39,16 @@ const AppNavigator = () => {
         <Stack.Screen name="AddAccount" component={AddAccountScreen} />
         <Stack.Screen name="PersonalizeAccount" component={PersonalizeAccountScreen} />
         <Stack.Screen name="LedgerContactDetail" component={LedgerContactDetailScreen} />
+        <Stack.Screen
+          name="LedgerAddContact"
+          component={LedgerAddContactScreen}
+          
+        />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Backup" component={BackupScreen} />
         <Stack.Screen name="CurrencySetup" component={CurrencySetupScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
-        <Stack.Screen name="UserSearch" component={UserSearchScreen} />
-        <Stack.Screen name="ChatConversation" component={ChatConversationScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

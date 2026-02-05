@@ -159,4 +159,15 @@ export const updateProfile = async (firebaseUid, profileData) => {
   }
 };
 
+
+// 8. Fetch Users By Phones
+export const fetchUsersByPhones = async (phones) => {
+  try {
+    const response = await api.post('/auth/users-by-phones', { phones });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
 export default api;
+

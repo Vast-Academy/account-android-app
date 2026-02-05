@@ -1,4 +1,4 @@
-﻿import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import {
 import {CommonActions} from '@react-navigation/native';
 import {Picker} from '@react-native-picker/picker';
 import Icon from 'react-native-vector-icons/Ionicons';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import BsCashCoin from '../components/icons/BsCashCoin';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
@@ -59,6 +60,7 @@ const getAccountTypeLabel = type => {
 const AmountEntryScreen = ({route, navigation}) => {
   const {showToast} = useToast();
   const currencySymbol = useCurrencySymbol();
+  const insets = useSafeAreaInsets();
 
   const {
     mode = 'add',
@@ -66,6 +68,8 @@ const AmountEntryScreen = ({route, navigation}) => {
     prevRouteKey,
     initialEntryDate,
     transferOnly = false,
+    returnOnly = false,
+    ledgerAction = null,
   } = route?.params ?? {};
 
   const [amount, setAmount] = useState('');
@@ -95,6 +99,7 @@ const AmountEntryScreen = ({route, navigation}) => {
 
   const isWithdrawMode = mode === 'withdraw';
   const isRequestMode = mode === 'request';
+  const isLedgerFlow = returnOnly && (ledgerAction === 'paid' || ledgerAction === 'get');
   const isExpenseAccount = account?.account_type === 'expenses';
 
   useEffect(() => {
@@ -185,6 +190,9 @@ const AmountEntryScreen = ({route, navigation}) => {
 
 
   const title = useMemo(() => {
+    if (isLedgerFlow) {
+      return ledgerAction === 'paid' ? 'Paid' : 'Get';
+    }
     if (isWithdrawMode) {
       return 'Withdraw / Transfer';
     }
@@ -192,7 +200,7 @@ const AmountEntryScreen = ({route, navigation}) => {
       return 'Request Amount';
     }
     return 'Add Amount';
-  }, [isWithdrawMode, isRequestMode]);
+  }, [isLedgerFlow, ledgerAction, isWithdrawMode, isRequestMode]);
 
   const isFutureEntryDate = value => {
     if (!(value instanceof Date)) {
@@ -279,13 +287,23 @@ const AmountEntryScreen = ({route, navigation}) => {
       return;
     }
 
-    if (!account?.id) {
+    if (!isLedgerFlow && !account?.id) {
       showToast('Account not found.', 'error');
       return;
     }
 
     const noteText = note?.trim?.() ?? note ?? '';
     const entryTimestamp = entryDate?.getTime?.() ?? Date.now();
+
+    if (isLedgerFlow) {
+      sendResultAndGoBack({
+        action: ledgerAction,
+        amount: parsedAmount,
+        note: noteText,
+        entryDateIso: entryDate?.toISOString?.() || null,
+      });
+      return;
+    }
 
     const requestFromPrimaryEarning = async (amountValue) => {
       const primary = getPrimaryEarningAccount();
@@ -933,8 +951,18 @@ const AmountEntryScreen = ({route, navigation}) => {
           </View>
             </View>
 
-            <View style={styles.bottomArea}>
-          {isWithdrawMode ? (
+          </ScrollView>
+
+          <View style={[styles.bottomArea, {paddingBottom: spacing.lg + insets.bottom}]}>
+          {isLedgerFlow ? (
+            <AmountActionButton
+              label={ledgerAction === 'paid' ? 'Paid' : 'Get'}
+              variant="successOutline"
+              style={styles.singleActionButton}
+              textStyle={styles.addText}
+              onPress={() => handleSubmit('add')}
+            />
+          ) : isWithdrawMode ? (
             <>
 
               <View style={styles.actionRow}>
@@ -993,8 +1021,6 @@ const AmountEntryScreen = ({route, navigation}) => {
             />
           )}
             </View>
-          </ScrollView>
-
 
           {transferPopupVisible && (
           <View style={styles.transferOverlay}>
@@ -1793,4 +1819,5 @@ const styles = StyleSheet.create({
 });
 
 export default AmountEntryScreen;
+
 
