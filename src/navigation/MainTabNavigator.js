@@ -88,7 +88,8 @@ const MainTabNavigator = ({route}) => {
             fontSize: fontSize.small,
             fontWeight: '500',
           },
-        }}>
+        }}
+        backBehavior="history">
         <Tab.Screen
           name="Dashboard"
           component={DashboardScreen}
@@ -103,8 +104,9 @@ const MainTabNavigator = ({route}) => {
           name="Ledger"
           component={LedgerScreen}
           options={{
+            tabBarLabel: 'Legder Talk',
             tabBarIcon: ({color, size}) => (
-              <Icon name="book" size={size} color={color} />
+              <Icon name="chatbox-ellipses" size={size} color={color} />
             ),
           }}
         />

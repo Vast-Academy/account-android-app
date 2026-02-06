@@ -25,7 +25,8 @@ export const initLedgerDatabase = () => {
               type TEXT NOT NULL CHECK(type IN ('paid', 'get')),
               note TEXT,
               transaction_date INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
+              created_at INTEGER NOT NULL,
+              edit_count INTEGER NOT NULL DEFAULT 0
             );
           `);
       
@@ -47,6 +48,13 @@ export const initLedgerDatabase = () => {
             `);
           } catch (e) {
             // Legacy table missing or migration already handled
+          }
+
+          // Add edit_count column if missing
+          try {
+            db.execute(`ALTER TABLE ledger_transactions ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0`);
+          } catch (e) {
+            // Column already exists, ignore
           }
 
           // Remove legacy nickname table
@@ -207,7 +215,38 @@ export const initLedgerDatabase = () => {
         }
       };
       
-      // Delete a transaction
+      
+      // Update transaction amount (for ledger entry edits)
+      export const updateLedgerTransactionAmount = (transactionId, nextAmount, nextEditCount) => {
+        try {
+          const db = getDB();
+          db.execute(
+            'UPDATE ledger_transactions SET amount = ?, edit_count = ? WHERE id = ?',
+            [Number(nextAmount), Number(nextEditCount || 0), Number(transactionId)]
+          );
+          return {success: true};
+        } catch (error) {
+          console.error('Failed to update ledger transaction amount:', error);
+          throw error;
+        }
+      };
+
+      // Update transaction note (for ledger entry edits)
+      export const updateLedgerTransactionNote = (transactionId, nextNote) => {
+        try {
+          const db = getDB();
+          db.execute(
+            'UPDATE ledger_transactions SET note = ? WHERE id = ?',
+            [String(nextNote || ''), Number(transactionId)]
+          );
+          return {success: true};
+        } catch (error) {
+          console.error('Failed to update ledger transaction note:', error);
+          throw error;
+        }
+      };
+
+// Delete a transaction
       export const deleteTransaction = transactionId => {
         try {
           const db = getDB();
@@ -445,15 +484,42 @@ export const initLedgerDatabase = () => {
           return [];
         }
       };
-      
 
+      // Get unified timeline: transactions + messages merged chronologically
+      export const getUnifiedTimeline = (contactRecordId, messages = [], limit = 50, offset = 0) => {
+        try {
+          const db = getDB();
 
+          const result = db.execute(
+            `SELECT * FROM ledger_transactions
+             WHERE contact_record_id = ?
+             ORDER BY transaction_date ASC`,
+            [String(contactRecordId)]
+          );
 
+          const transactionRows = result.rows?._array || [];
 
+          const transactionItems = transactionRows.map(transaction => ({
+            id: `txn-${transaction.id}`,
+            type: 'transaction',
+            timestamp: transaction.transaction_date,
+            data: transaction,
+          }));
 
+          const messageItems = (messages || []).map(message => ({
+            id: `msg-${message.message_id || message.id}`,
+            type: 'message',
+            timestamp: message.timestamp,
+            data: message,
+          }));
 
+          const merged = [...transactionItems, ...messageItems];
+          merged.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-
-
-
+          return merged.slice(offset, offset + limit);
+        } catch (error) {
+          console.error('Failed to get unified timeline:', error);
+          return [];
+        }
+      };
 

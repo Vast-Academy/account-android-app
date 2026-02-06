@@ -172,11 +172,11 @@ export const batchSearchUsers = async (phoneNumbers) => {
     const token = await getAuthToken();
     console.log('✅ DEBUG [batchSearchUsers]: Got auth token:', token ? `${token.substring(0, 20)}...` : 'null');
 
-    const url = `${API_URL}/users/batch-search`;
+    const url = `${API_URL}/auth/users-by-phones`;
     console.log('🔧 DEBUG [batchSearchUsers]: API URL:', url);
     console.log('🔧 DEBUG [batchSearchUsers]: Full API_URL:', API_URL);
 
-    const payload = { phoneNumbers };
+    const payload = { phones: phoneNumbers };
     console.log('📤 DEBUG [batchSearchUsers]: Payload:', JSON.stringify(payload));
 
     console.log('🔧 DEBUG [batchSearchUsers]: Making fetch call...');

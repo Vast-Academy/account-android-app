@@ -16,8 +16,8 @@ import {auth} from '../config/firebase';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {updateProfile, checkUsername} from '../services/api';
 import {queueBackupFromStorage} from '../utils/backupQueue';
-import {isSetupComplete} from '../services/userSetup';
 import {initAccountsDatabase} from '../services/accountsDatabase';
+import {initMessagingService} from '../services/messagingService';
 import {COUNTRIES, countryToCurrency, getCurrencyNameByCountry} from '../utils/countries';
 
 const ProfileSetupScreen = ({navigation, route}) => {
@@ -26,6 +26,7 @@ const ProfileSetupScreen = ({navigation, route}) => {
   const [displayName, setDisplayName] = React.useState('');
   const [phoneNumber, setPhoneNumber] = React.useState('');
   const [selectedCountry, setSelectedCountry] = React.useState('IN');
+  const [countryCode, setCountryCode] = React.useState('+91');
   const [selectedCurrency, setSelectedCurrency] = React.useState('₹');
   const [username, setUsername] = React.useState('');
   const [checkingUsername, setCheckingUsername] = React.useState(false);
@@ -44,6 +45,10 @@ const ProfileSetupScreen = ({navigation, route}) => {
         setPhoneNumber(routeUser.phoneNumber || routeUser.mobile || '');
         if (routeUser.country) {
           setSelectedCountry(routeUser.country);
+          const countryObj = COUNTRIES.find(c => c.code === routeUser.country);
+          if (countryObj) {
+            setCountryCode(countryObj.dialCode);
+          }
         }
         const currency = routeUser.currencySymbol || countryToCurrency[routeUser.country] || '₹';
         setSelectedCurrency(currency);
@@ -58,6 +63,10 @@ const ProfileSetupScreen = ({navigation, route}) => {
           setPhoneNumber(parsed.phoneNumber || parsed.mobile || '');
           if (parsed.country) {
             setSelectedCountry(parsed.country);
+            const countryObj = COUNTRIES.find(c => c.code === parsed.country);
+            if (countryObj) {
+              setCountryCode(countryObj.dialCode);
+            }
           }
           const currency = parsed.currencySymbol || countryToCurrency[parsed.country] || '₹';
           setSelectedCurrency(currency);
@@ -69,11 +78,17 @@ const ProfileSetupScreen = ({navigation, route}) => {
     loadUser();
   }, [routeUser]);
 
-  // Auto-fill currency when country changes
+  // Auto-fill currency and country code when country changes
   React.useEffect(() => {
     const currency = countryToCurrency[selectedCountry];
     if (currency) {
       setSelectedCurrency(currency);
+    }
+
+    // Set country code based on selected country
+    const countryObj = COUNTRIES.find(c => c.code === selectedCountry);
+    if (countryObj) {
+      setCountryCode(countryObj.dialCode);
     }
   }, [selectedCountry]);
 
@@ -188,10 +203,13 @@ const ProfileSetupScreen = ({navigation, route}) => {
         return;
       }
 
+      // Combine country code with phone number for backend
+      const fullPhoneNumber = countryCode + phoneNumber.trim();
+
       const response = await updateProfile(firebaseUid, {
         displayName: displayName.trim(),
         username: username.trim().toLowerCase(),
-        mobile: phoneNumber.trim(),
+        mobile: fullPhoneNumber,
         country: selectedCountry,
         currency: selectedCurrency,
         gender: storedUser?.gender || null,
@@ -215,8 +233,8 @@ const ProfileSetupScreen = ({navigation, route}) => {
         ...response.user,
         displayName: displayName.trim(),
         username: username.trim().toLowerCase(),
-        phoneNumber: phoneNumber.trim(),
-        mobile: phoneNumber.trim(),
+        phoneNumber: fullPhoneNumber,
+        mobile: fullPhoneNumber,
         country: selectedCountry,
         currencySymbol: selectedCurrency,
         setupComplete: true,
@@ -225,8 +243,18 @@ const ProfileSetupScreen = ({navigation, route}) => {
       setCurrentUser(updatedUser);
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
       queueBackupFromStorage();
-      const showTutorial = !isSetupComplete();
-      navigation.replace('Home', {user: updatedUser, showTutorial});
+
+      // Initialize messaging service to get FCM token
+      console.log('🔔 Initializing messaging service for FCM token...');
+      try {
+        await initMessagingService();
+        console.log('✅ Messaging service initialized successfully');
+      } catch (msgError) {
+        console.warn('⚠️ Failed to initialize messaging service:', msgError);
+        // Continue even if messaging init fails
+      }
+
+      navigation.replace('Home', {user: updatedUser});
     } catch (error) {
       console.error('Failed to save profile setup:', error);
       Alert.alert('Error', error.message || 'Failed to update profile');

@@ -1,27 +1,32 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useMemo, useRef} from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
+  Pressable,
   Modal,
   TextInput,
   Alert,
   Animated,
   Keyboard,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   initLedgerDatabase,
   createTransaction as createLedgerTransaction,
   getTransactionsByContact,
   calculateContactBalance,
+  getUnifiedTimeline,
 } from '../services/ledgerDatabase';
 import {
   initAccountsDatabase,
@@ -31,6 +36,14 @@ import {
   initTransactionsDatabase,
   createTransaction as createAccountTransaction,
 } from '../services/transactionsDatabase';
+import {
+  initChatDatabase,
+  createConversation,
+  getMessages,
+} from '../services/chatDatabase';
+import { sendMessageToUser } from '../services/messagingService';
+import { searchUsersByPhone, batchSearchUsers } from '../services/userProfileService';
+import {useChatStore} from '../context/ChatStore';
 
 const LEDGER_GET_DEFAULT_MODE_KEY = 'ledgerGetDefaultMode';
 const LEDGER_GET_DEFAULT_PREFIX = 'ledgerGetDefault:';
@@ -39,11 +52,13 @@ const LEDGER_GET_DEFAULT_TRANSFER = 'transfer';
 const LEDGER_PAID_DEFAULT_PREFIX = 'ledgerPaidDefault:';
 const LEDGER_PAID_DEFAULT_DEBIT = 'debit';
 const LEDGER_PAID_DEFAULT_RECORD = 'record';
+const LEDGER_CHAT_CACHE_PREFIX = 'ledgerChatCache:';
 
 const LedgerContactDetailScreen = ({route, navigation}) => {
   const {contact} = route.params || {};
   const {showToast} = useToast();
   const currencySymbol = useCurrencySymbol();
+  const insets = useSafeAreaInsets();
 
   const [transactions, setTransactions] = useState([]);
   const [balance, setBalance] = useState({
@@ -64,19 +79,75 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const [rememberPaidChoice, setRememberPaidChoice] = useState(false);
   const [paidDefaultChoice, setPaidDefaultChoice] = useState(null);
   const [getPromptVisible, setGetPromptVisible] = useState(false);
+  const [optionsVisible, setOptionsVisible] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [editAmountVisible, setEditAmountVisible] = useState(false);
+  const [editRemarkVisible, setEditRemarkVisible] = useState(false);
+  const [editAmount, setEditAmount] = useState('');
+  const [editRemark, setEditRemark] = useState('');
   const [rememberGetChoice, setRememberGetChoice] = useState(false);
   const [getDefaultChoice, setGetDefaultChoice] = useState(null);
 
+  // Chat-related states
+  const [appUser, setAppUser] = useState(null);
+  const [conversationId, setConversationId] = useState(null);
+  const [isAppUser, setIsAppUser] = useState(false);
+  const [unifiedTimeline, setUnifiedTimeline] = useState([]);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const chatStoreState = useChatStore();
+  const conversationVersion = chatStoreState.conversationVersion?.[conversationId] || 0;
+
   // Animation values
   const modalSlideAnim = useRef(new Animated.Value(300)).current;
-  const scrollViewRef = useRef(null);
+  const optionsOverlayOpacity = useRef(new Animated.Value(0)).current;
+  const optionsContentTranslateY = useRef(new Animated.Value(300)).current;
+  const listRef = useRef(null);
   const amountInputRef = useRef(null);
   const noteInputRef = useRef(null);
+  const chatInputRef = useRef(null);
+
+  useEffect(() => {
+    if (optionsVisible) {
+      optionsOverlayOpacity.setValue(0);
+      optionsContentTranslateY.setValue(300);
+      Animated.parallel([
+        Animated.timing(optionsOverlayOpacity, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(optionsContentTranslateY, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(optionsOverlayOpacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(optionsContentTranslateY, {
+          toValue: 300,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [optionsVisible, optionsOverlayOpacity, optionsContentTranslateY]);
 
   useEffect(() => {
     initLedgerDatabase();
     initAccountsDatabase();
     initTransactionsDatabase();
+    initChatDatabase(); // Initialize chat tables
     loadData();
   }, []);
 
@@ -87,14 +158,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     return unsubscribe;
   }, [navigation]);
 
-  useEffect(() => {
-    // Auto-scroll to bottom when transactions change (instantly, no animation)
-    if (transactions.length > 0 && scrollViewRef.current) {
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: false });
-      }, 0);
-    }
-  }, [transactions]);
 
   useEffect(() => {
     // Auto-focus keyboard when modal opens
@@ -104,6 +167,28 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       }, 300);
     }
   }, [transactionModalVisible]);
+
+  useEffect(() => {
+    if (conversationId && isAppUser) {
+      loadUnifiedTimeline(conversationId);
+    }
+  }, [conversationId, conversationVersion, isAppUser]);
+
+  useEffect(() => {
+    const showListener = Keyboard.addListener('keyboardDidShow', event => {
+      setIsKeyboardVisible(true);
+      setKeyboardHeight(event.endCoordinates?.height || 0);
+    });
+    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
+  }, []);
+
 
   useEffect(() => {
     const loadGetDefault = async () => {
@@ -183,6 +268,311 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     loadPaidDefault();
   }, [contact?.recordID]);
 
+  const getChatCacheKey = () => {
+    if (!contact?.recordID) {
+      return null;
+    }
+    return `${LEDGER_CHAT_CACHE_PREFIX}${contact.recordID}`;
+  };
+
+  const loadCachedChatIdentity = async () => {
+    const cacheKey = getChatCacheKey();
+    if (!cacheKey) {
+      return null;
+    }
+    try {
+      const cached = await AsyncStorage.getItem(cacheKey);
+      return cached ? JSON.parse(cached) : null;
+    } catch (error) {
+      console.error('Failed to load chat cache:', error);
+      return null;
+    }
+  };
+
+  const saveCachedChatIdentity = async (payload) => {
+    const cacheKey = getChatCacheKey();
+    if (!cacheKey || !payload) {
+      return;
+    }
+    try {
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(payload));
+    } catch (error) {
+      console.error('Failed to save chat cache:', error);
+    }
+  };
+
+  const resolveAppUserFromContact = () => {
+    const contactUser = contact?.appUser || null;
+    const contactUserId = contact?.userId || contact?.firebaseUid || '';
+    const contactIsAppUser = contact?.isAppUser === true || Number(contact?.isAppUser) === 1;
+
+    if (contactUser) {
+      return contactUser;
+    }
+    if (contactIsAppUser || contactUserId) {
+      return {
+        userId: contactUserId,
+        firebaseUid: contactUserId,
+        displayName: contact?.displayName || contact?.savedName || 'Contact',
+      };
+    }
+    return null;
+  };
+
+  // Map contact to app user for chat functionality
+  const mapContactToAppUser = async () => {
+    const cachedIdentity = await loadCachedChatIdentity();
+    if (cachedIdentity?.userId) {
+      const cachedUser = {
+        userId: cachedIdentity.userId,
+        firebaseUid: cachedIdentity.firebaseUid || cachedIdentity.userId,
+        displayName: cachedIdentity.displayName || contact?.displayName || contact?.savedName || 'Contact',
+      };
+      setAppUser(cachedUser);
+      setIsAppUser(true);
+
+      if (cachedIdentity.conversationId) {
+        setConversationId(cachedIdentity.conversationId);
+        await loadUnifiedTimeline(cachedIdentity.conversationId);
+        return;
+      }
+
+      const currentUserId = await AsyncStorage.getItem('firebaseUid');
+      if (currentUserId) {
+        const convId = await createConversation(
+          cachedUser.firebaseUid || cachedUser.userId,
+          cachedUser,
+          currentUserId
+        );
+        setConversationId(convId);
+        await saveCachedChatIdentity({
+          ...cachedIdentity,
+          conversationId: convId,
+        });
+        await loadUnifiedTimeline(convId);
+      } else {
+        await loadUnifiedTimeline(null);
+      }
+      return;
+    }
+
+    const resolved = resolveAppUserFromContact();
+    if (resolved) {
+      console.log('✅ [CHAT] Contact already has app user data:', resolved);
+      setAppUser(resolved);
+      setIsAppUser(true);
+      await saveCachedChatIdentity({
+        userId: resolved.userId || resolved.firebaseUid || '',
+        firebaseUid: resolved.firebaseUid || resolved.userId || '',
+        displayName: resolved.displayName || contact?.displayName || contact?.savedName || 'Contact',
+        conversationId: null,
+      });
+      const currentUserId = await AsyncStorage.getItem('firebaseUid');
+      if (currentUserId) {
+        const convId = await createConversation(
+          resolved.firebaseUid || resolved.userId,
+          resolved,
+          currentUserId
+        );
+        setConversationId(convId);
+        await saveCachedChatIdentity({
+          userId: resolved.userId || resolved.firebaseUid || '',
+          firebaseUid: resolved.firebaseUid || resolved.userId || '',
+          displayName: resolved.displayName || contact?.displayName || contact?.savedName || 'Contact',
+          conversationId: convId,
+        });
+        await loadUnifiedTimeline(convId);
+      }
+      return;
+    }
+    try {
+      setLoadingChat(true);
+      const phoneNumber = getContactPhone();
+      console.log('🔍 [CHAT] Extracted phone number (raw):', phoneNumber);
+
+      if (!phoneNumber || phoneNumber === 'No phone number') {
+        console.log('❌ [CHAT] No phone number found');
+        setIsAppUser(false);
+        setLoadingChat(false);
+        return;
+      }
+
+      // Try multiple phone formats for better matching
+      const normalizedPhone = normalizePhoneNumber(phoneNumber);
+      console.log('🔍 [CHAT] Normalized phone number:', normalizedPhone);
+
+      if (!normalizedPhone) {
+        console.log('❌ [CHAT] Phone number normalization failed');
+        setIsAppUser(false);
+        setLoadingChat(false);
+        return;
+      }
+
+      // Try batch search with multiple formats
+      console.log('🔍 [CHAT] Searching for user with phones:', [phoneNumber, normalizedPhone, `+91${normalizedPhone}`]);
+      const usersMap = await batchSearchUsers([
+        phoneNumber,           // Original format: +919256537003
+        normalizedPhone,       // Normalized: 9256537003
+        `+91${normalizedPhone}`  // With country code: +919256537003
+      ]);
+      console.log('📱 [CHAT] Search results map:', usersMap);
+      const users = Object.values(usersMap || {});
+      const user = users && users.length > 0 ? users[0] : null;
+
+      if (user) {
+        console.log('✅ [CHAT] App user found:', user);
+        setAppUser(user);
+        setIsAppUser(true);
+        await saveCachedChatIdentity({
+          userId: user.userId || user.firebaseUid || '',
+          firebaseUid: user.firebaseUid || user.userId || '',
+          displayName: user.displayName || contact?.displayName || contact?.savedName || 'Contact',
+          conversationId: null,
+        });
+
+        // Get or create conversation
+        const currentUserId = await AsyncStorage.getItem('firebaseUid');
+        const convId = await createConversation(
+          user.firebaseUid || user.userId,
+          user,
+          currentUserId
+        );
+        setConversationId(convId);
+        await saveCachedChatIdentity({
+          userId: user.userId || user.firebaseUid || '',
+          firebaseUid: user.firebaseUid || user.userId || '',
+          displayName: user.displayName || contact?.displayName || contact?.savedName || 'Contact',
+          conversationId: convId,
+        });
+
+        // Load chat messages
+        await loadUnifiedTimeline(convId);
+      } else {
+        console.log('❌ [CHAT] No app user found for phone:', phoneNumber);
+        setIsAppUser(false);
+      }
+    } catch (error) {
+      console.error('❌ [CHAT] Failed to map contact to user:', error);
+      setIsAppUser(false);
+    } finally {
+      setLoadingChat(false);
+    }
+  };
+
+  // Load unified timeline (transactions + messages)
+  const loadUnifiedTimeline = async (convId = null) => {
+    if (!contact?.recordID) {
+      return;
+    }
+
+    try {
+      const messages = convId ? await getMessages(convId, 50, 0) : [];
+      const timeline = getUnifiedTimeline(contact.recordID, messages);
+      const sorted = [...(timeline || [])].sort(
+        (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
+      );
+      setUnifiedTimeline(sorted);
+    } catch (error) {
+      console.error('Failed to load unified timeline:', error);
+      setUnifiedTimeline([]);
+    }
+  };
+
+  // Load current user ID on mount
+  useEffect(() => {
+    const loadCurrentUserId = async () => {
+      try {
+        const uid = await AsyncStorage.getItem('firebaseUid');
+        setCurrentUserId(uid);
+      } catch (error) {
+        console.error('Failed to load current user ID:', error);
+      }
+    };
+    loadCurrentUserId();
+  }, []);
+
+  // Map contact to app user on mount
+  useEffect(() => {
+    if (contact) {
+      mapContactToAppUser();
+    }
+  }, [contact?.recordID, contact?.phoneNumbers]);
+
+  // Send message handler
+  const handleSendMessage = async () => {
+    if (!messageText.trim() || !conversationId || !appUser) return;
+
+    chatInputRef.current?.focus();
+    setSendingMessage(true);
+    const now = Date.now();
+    const messageId = `msg_${now}_${Math.random().toString(36).substr(2, 9)}`;
+    const messageValue = messageText.trim();
+
+    const optimisticMessage = {
+      id: `msg-${messageId}`,
+      type: 'message',
+      timestamp: now,
+      data: {
+        message_id: messageId,
+        message_text: messageValue,
+        sender_id: currentUserId || '',
+        receiver_id: appUser.firebaseUid || appUser.userId,
+        delivery_status: 'sending',
+        is_read: 0,
+        timestamp: now,
+      },
+    };
+
+    setUnifiedTimeline(prev => [optimisticMessage, ...(prev || [])]);
+    setMessageText('');
+    setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 0);
+
+    try {
+      console.log('???? [SEND] Starting message send...');
+      console.log('???? [SEND] Message:', {
+        messageId,
+        conversationId,
+        receiverId: appUser.firebaseUid || appUser.userId,
+        messageText: messageValue.substring(0, 50) + '...',
+      });
+
+      // Send message via messaging service
+      const result = await sendMessageToUser(
+        appUser.firebaseUid || appUser.userId,
+        {
+          conversationId,
+          messageId,
+          messageText: messageValue,
+          messageType: 'text',
+          timestamp: now,
+        }
+      );
+
+      console.log('??? [SEND] Backend response received:', result);
+
+      // Reload messages
+      console.log('???? [SEND] Loading messages from database...');
+      await loadUnifiedTimeline(conversationId);
+      console.log('??? [SEND] Messages loaded');
+
+      console.log('??? [SEND] Message sent successfully!');
+      showToast('Message sent', 'success');
+    } catch (error) {
+      console.error('??? [SEND] Failed to send message:', error);
+      console.error('??? [SEND] Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      showToast('Failed to send message', 'error');
+      await loadUnifiedTimeline(conversationId);
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
   const loadData = () => {
     if (!contact?.recordID) {
       return;
@@ -192,6 +582,13 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
 
     const bal = calculateContactBalance(contact.recordID);
     setBalance(bal);
+
+    // Ledger-first: show ledger entries immediately
+    loadUnifiedTimeline(null);
+
+    if (conversationId) {
+      loadUnifiedTimeline(conversationId);
+    }
   };
 
   const getContactName = () => {
@@ -203,6 +600,17 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       .join(' ')
       .trim();
     return fullName || contact?.displayName || 'Unknown Contact';
+  };
+
+  const normalizePhoneNumber = (phone) => {
+    if (!phone) return '';
+    // Remove all non-digits
+    const digits = String(phone).replace(/\D/g, '');
+    // Return last 10 digits (remove country code)
+    if (digits.length > 10) {
+      return digits.slice(-10);
+    }
+    return digits.length >= 8 ? digits : '';
   };
 
   const getContactPhone = () => {
@@ -462,6 +870,141 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     });
   };
 
+  const getLatestTransactionId = () => {
+    if (!transactions || transactions.length === 0) {
+      return null;
+    }
+    const last = transactions[transactions.length - 1];
+    return last?.id ?? null;
+  };
+
+  const canEditTransaction = txn => {
+    if (!txn) {
+      return false;
+    }
+    if (Number(txn.edit_count) >= 3) {
+      return false;
+    }
+    const latestId = getLatestTransactionId();
+    return latestId && txn.id === latestId;
+  };
+
+  const canDeleteTransaction = txn => {
+    if (!txn) {
+      return false;
+    }
+    const latestId = getLatestTransactionId();
+    return latestId && txn.id === latestId;
+  };
+
+  const openTransactionMenu = txn => {
+    setSelectedTransaction(txn);
+    setOptionsVisible(true);
+  };
+
+  const closeTransactionMenu = () => {
+    setOptionsVisible(false);
+    setSelectedTransaction(null);
+  };
+
+  const handleEditAmount = () => {
+    if (!selectedTransaction || !canEditTransaction(selectedTransaction)) {
+      return;
+    }
+    const currentAbs = Math.abs(Number(selectedTransaction.amount) || 0);
+    setEditAmount(String(currentAbs || ''));
+    setEditAmountVisible(true);
+    closeTransactionMenu();
+  };
+
+  const handleEditRemark = () => {
+    if (!selectedTransaction || !canEditTransaction(selectedTransaction)) {
+      return;
+    }
+    setEditRemark(selectedTransaction.note || '');
+    setEditRemarkVisible(true);
+    closeTransactionMenu();
+  };
+
+  const handleSaveEditAmount = async () => {
+    if (!selectedTransaction) {
+      return;
+    }
+    const parsed = parseFloat(String(editAmount).replace(/[^0-9.]/g, ''));
+    if (!parsed || parsed <= 0) {
+      showToast('Please enter a valid amount.', 'error');
+      return;
+    }
+    if (!canEditTransaction(selectedTransaction)) {
+      showToast('Edit not allowed.', 'error');
+      return;
+    }
+    const nextAmount = selectedTransaction.type === 'paid' ? parsed : parsed;
+    const nextEditCount = Number(selectedTransaction.edit_count || 0) + 1;
+    setLoading(true);
+    try {
+      await updateLedgerTransactionAmount(selectedTransaction.id, nextAmount, nextEditCount);
+      setEditAmountVisible(false);
+      setEditAmount('');
+      setSelectedTransaction(null);
+      loadTransactions();
+    } catch (error) {
+      console.error('Failed to update amount:', error);
+      Alert.alert('Error', 'Failed to update amount. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveEditRemark = async () => {
+    if (!selectedTransaction) {
+      return;
+    }
+    if (!canEditTransaction(selectedTransaction)) {
+      showToast('Edit not allowed.', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      await updateLedgerTransactionNote(selectedTransaction.id, editRemark.trim());
+      setEditRemarkVisible(false);
+      setEditRemark('');
+      setSelectedTransaction(null);
+      loadTransactions();
+    } catch (error) {
+      console.error('Failed to update remark:', error);
+      Alert.alert('Error', 'Failed to update remark. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTransaction = () => {
+    if (!selectedTransaction || !canDeleteTransaction(selectedTransaction)) {
+      return;
+    }
+    Alert.alert('Delete Entry', 'Are you sure you want to delete this entry?', [
+      {text: 'Cancel', style: 'cancel'},
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setLoading(true);
+          try {
+            await deleteTransaction(selectedTransaction.id);
+            closeTransactionMenu();
+            loadTransactions();
+          } catch (error) {
+            console.error('Failed to delete transaction:', error);
+            Alert.alert('Error', 'Failed to delete entry.');
+          } finally {
+            setLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const formatTimeLabel = timestamp => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-IN', {
@@ -470,85 +1013,127 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     });
   };
 
-  const renderTransactions = () => {
-    if (transactions.length === 0) {
-      return (
-        <View style={styles.emptyHistory}>
-          <Icon name="receipt-outline" size={48} color="#D1D5DB" />
-          <Text style={styles.emptyText}>No transactions yet</Text>
-        </View>
-      );
-    }
+  const balanceAfterById = useMemo(() => {
+    const map = {};
+    let running = 0;
+    const ordered = [...(transactions || [])].sort(
+      (a, b) => (a.transaction_date || 0) - (b.transaction_date || 0)
+    );
+    ordered.forEach(txn => {
+      const amountValue = Number(txn.amount) || 0;
+      const isPaid = txn.type === 'paid';
+      running += isPaid ? amountValue : -amountValue;
+      map[txn.id] = running;
+    });
+    return map;
+  }, [transactions]);
 
+  const timelineForList = useMemo(() => {
     let lastDateKey = '';
-    let runningBalance = 0;
+    return (unifiedTimeline || []).map(item => {
+      if (item.type !== 'transaction' || !item.data) {
+        return {...item, showDate: false};
+      }
+      const dateKey = new Date(item.data.transaction_date).toDateString();
+      const showDate = dateKey !== lastDateKey;
+      lastDateKey = dateKey;
+      return {...item, showDate};
+    });
+  }, [unifiedTimeline]);
+
+  // Render chat message bubble (using currentUserId from state)
+  const renderChatMessage = (message, currentUserId) => {
+    const isSent = message.sender_id === currentUserId;
 
     return (
-      <View style={styles.chatList}>
-        {transactions.map(transaction => {
-          const dateKey = new Date(transaction.transaction_date).toDateString();
-          const showDate = dateKey !== lastDateKey;
-          lastDateKey = dateKey;
+      <View key={`msg-${message.message_id || message.id}`} style={styles.chatRow}>
+        <View style={[
+          styles.chatBubble,
+          isSent ? styles.chatBubbleSent : styles.chatBubbleReceived
+        ]}>
+          <Text style={styles.chatMessageText}>{message.message_text}</Text>
+          <Text style={styles.chatTime}>
+            {formatTimeLabel(message.timestamp)}
+          </Text>
+        </View>
+      </View>
+    );
+  };
 
-          const amountValue = Number(transaction.amount) || 0;
-          const isPaid = transaction.type === 'paid';
-          const delta = isPaid ? amountValue : -amountValue;
-          runningBalance += delta;
-          const balanceAfter = runningBalance;
+  const renderTimelineItem = (item) => {
+    if (!item) {
+      return null;
+    }
 
-          return (
-            <View key={transaction.id}>
-              {showDate && (
-                <View style={styles.datePill}>
-                  <Text style={styles.datePillText}>
-                    {formatDateLabel(transaction.transaction_date)}
-                  </Text>
-                </View>
-              )}
-              <View style={[styles.chatRow, isPaid && styles.chatRowDebit]}>
-                <View
-                  style={[
-                    styles.chatBubble,
-                    isPaid ? styles.chatBubbleDebit : styles.chatBubbleCredit,
-                  ]}>
-                  <View style={styles.chatHeader}>
-                    <View
-                      style={[styles.chatIcon, isPaid && styles.chatIconDebit]}>
-                      <Icon
-                        name={isPaid ? 'arrow-up' : 'arrow-down'}
-                        size={16}
-                        color={isPaid ? '#EF4444' : '#10B981'}
-                      />
-                    </View>
-                    <Text
-                      style={[styles.chatAmount, isPaid && styles.chatAmountDebit]}>
-                      {`${isPaid ? '-' : '+'} ${formatCurrency(amountValue)}`}
-                    </Text>
-                    <View style={styles.chatHeaderRight}>
-                      <Text style={styles.chatTime}>
-                        {formatTimeLabel(transaction.transaction_date)}
-                      </Text>
-                    </View>
-                  </View>
-                  {transaction.note ? (
-                    <Text style={styles.chatRemark}>{transaction.note}</Text>
-                  ) : null}
-                </View>
-                <View style={[styles.chatMeta, isPaid && styles.chatMetaDebit]}>
-                  <Text style={styles.chatBalance}>
-                    {formatSignedBalance(balanceAfter)}
-                  </Text>
-                </View>
+    if (item.type === 'message') {
+      return renderChatMessage(item.data, currentUserId);
+    }
+
+    const transaction = item.data;
+    if (!transaction) {
+      return null;
+    }
+
+    const amountValue = Number(transaction.amount) || 0;
+    const isPaid = transaction.type === 'paid';
+
+    return (
+      <View>
+        {item.showDate && (
+          <View style={styles.datePill}>
+            <Text style={styles.datePillText}>
+              {formatDateLabel(transaction.transaction_date)}
+            </Text>
+          </View>
+        )}
+        <Pressable
+          style={[styles.chatRow, isPaid && styles.chatRowDebit]}
+          onLongPress={() => openTransactionMenu(transaction)}
+          delayLongPress={250}>
+          <View
+            style={[
+              styles.chatBubble,
+              isPaid ? styles.chatBubbleDebit : styles.chatBubbleCredit,
+            ]}>
+            <View style={styles.chatHeader}>
+              <View style={[styles.chatIcon, isPaid && styles.chatIconDebit]}>
+                <Icon
+                  name={isPaid ? 'arrow-up' : 'arrow-down'}
+                  size={16}
+                  color={isPaid ? '#EF4444' : '#10B981'}
+                />
+              </View>
+              <Text
+                style={[styles.chatAmount, isPaid && styles.chatAmountDebit]}>
+                {`${isPaid ? '-' : '+'} ${formatCurrency(amountValue)}`}
+              </Text>
+              <View style={styles.chatHeaderRight}>
+                <Text style={styles.chatTime}>
+                  {formatTimeLabel(transaction.transaction_date)}
+                </Text>
               </View>
             </View>
-          );
-        })}
+            {transaction.note ? (
+              <Text style={styles.chatRemark}>{transaction.note}</Text>
+            ) : null}
+          </View>
+          <View style={[styles.chatMeta, isPaid && styles.chatMetaDebit]}>
+            <Text style={styles.chatBalance}>
+              {formatSignedBalance(balanceAfterById[transaction.id] || 0)}
+            </Text>
+          </View>
+        </Pressable>
       </View>
     );
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      enabled={Platform.OS === 'ios'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}>
+      <View style={styles.content}>
       {/* Header + Totals */}
       <View style={styles.headerBlock}>
         <View style={styles.headerRow}>
@@ -598,33 +1183,282 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         </View>
       </View>
 
-      <ScrollView
-        ref={scrollViewRef}
+      <FlatList
+        ref={listRef}
+        data={timelineForList}
+        keyExtractor={item => item.id}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.historySection}>{renderTransactions()}</View>
-      </ScrollView>
+        contentContainerStyle={[
+          styles.scrollContent,
+          styles.historySection,
+          styles.chatList,
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="always"
+        inverted
+        renderItem={({item}) => renderTimelineItem(item)}
+        ListEmptyComponent={
+          <View style={styles.emptyHistory}>
+            <Icon name="receipt-outline" size={48} color="#D1D5DB" />
+            <Text style={styles.emptyText}>No transactions or messages yet</Text>
+          </View>
+        }
+      />
 
       {/* Bottom Buttons */}
-      <View style={styles.bottomButtons}>
+      {!isKeyboardVisible && (
+        <View style={[styles.bottomButtons, {paddingBottom: spacing.md + insets.bottom}]}>
         <TouchableOpacity
           style={[styles.actionButton, styles.paidButton]}
           onPress={() => openTransactionModal('paid')}>
           <Icon name="arrow-up" size={20} color="#EF4444" />
-          <Text style={[styles.actionButtonText, styles.paidButtonText]}>
-            Paid
-          </Text>
+          <Text style={styles.paidButtonText}>Paid</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionButton, styles.getButton]}
           onPress={() => openTransactionModal('get')}>
           <Icon name="arrow-down" size={20} color="#10B981" />
-          <Text style={[styles.actionButtonText, styles.getButtonText]}>
-            Get
-          </Text>
+          <Text style={styles.getButtonText}>Get</Text>
         </TouchableOpacity>
-      </View>
+        </View>
+      )}
+
+      {/* Chat Input (only if app user) */}
+      {isAppUser && (
+        <View style={[styles.chatInputContainer, {paddingBottom: spacing.sm + insets.bottom + (Platform.OS === 'android' ? keyboardHeight : 0)}]}>
+          <TextInput
+            ref={chatInputRef}
+            style={styles.chatInput}
+            placeholder="Type a message..."
+            value={messageText}
+            onChangeText={setMessageText}
+            multiline
+            blurOnSubmit={false}
+            placeholderTextColor={colors.text.secondary}
+            editable={true}
+          />
+          <TouchableOpacity
+            style={styles.sendButton}
+            onPress={handleSendMessage}
+            disabled={!messageText.trim() || sendingMessage}>
+            <Icon
+              name="send"
+              size={20}
+              color={messageText.trim() && !sendingMessage ? colors.primary : colors.text.light}
+            />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Invite Banner (if not app user) */}
+      {!isAppUser && !loadingChat && (
+        <View style={[styles.inviteBanner, {paddingBottom: spacing.md + insets.bottom}]}>
+          <Text style={styles.inviteText}>
+            Invite {getContactName()} to enable chat feature.
+          </Text>
+          <TouchableOpacity style={styles.inviteButton}>
+            <Text style={styles.inviteButtonText}>Invite</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Entry Options */}
+      <Modal
+        visible={optionsVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeTransactionMenu}>
+        <Animated.View
+          style={[styles.optionsOverlay, {opacity: optionsOverlayOpacity}]}
+        >
+          <TouchableOpacity
+            style={styles.optionsOverlayTouchable}
+            activeOpacity={1}
+            onPress={closeTransactionMenu}
+          />
+          <Animated.View
+            style={[
+              styles.optionsContainer,
+              {transform: [{translateY: optionsContentTranslateY}]},
+            ]}>
+            <View style={styles.optionsHeader}>
+              <Text style={styles.optionsTitle}>
+                {selectedTransaction
+                  ? `Options for ${formatCurrency(
+                      Math.abs(Number(selectedTransaction.amount) || 0)
+                    )}`
+                  : 'Options'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                !canEditTransaction(selectedTransaction) &&
+                  styles.optionButtonDisabled,
+              ]}
+              disabled={!canEditTransaction(selectedTransaction)}
+              onPress={handleEditAmount}>
+              <View style={styles.optionItemRow}>
+                <Icon
+                  name="create-outline"
+                  size={20}
+                  color={
+                    canEditTransaction(selectedTransaction)
+                      ? colors.text.primary
+                      : colors.text.light
+                  }
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    !canEditTransaction(selectedTransaction) &&
+                      styles.optionTextDisabled,
+                  ]}>
+                  Edit Amount
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                !canEditTransaction(selectedTransaction) &&
+                  styles.optionButtonDisabled,
+              ]}
+              disabled={!canEditTransaction(selectedTransaction)}
+              onPress={handleEditRemark}>
+              <View style={styles.optionItemRow}>
+                <Icon
+                  name="chatbubble-ellipses-outline"
+                  size={20}
+                  color={
+                    canEditTransaction(selectedTransaction)
+                      ? colors.text.primary
+                      : colors.text.light
+                  }
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    !canEditTransaction(selectedTransaction) &&
+                      styles.optionTextDisabled,
+                  ]}>
+                  Edit Remark
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                styles.optionDelete,
+                !canDeleteTransaction(selectedTransaction) &&
+                  styles.optionButtonDisabled,
+              ]}
+              disabled={!canDeleteTransaction(selectedTransaction)}
+              onPress={handleDeleteTransaction}>
+              <View style={styles.optionItemRow}>
+                <Icon
+                  name="trash-outline"
+                  size={20}
+                  color={
+                    canDeleteTransaction(selectedTransaction)
+                      ? '#B91C1C'
+                      : colors.text.light
+                  }
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    styles.optionDeleteText,
+                    !canDeleteTransaction(selectedTransaction) &&
+                      styles.optionTextDisabled,
+                  ]}>
+                  Delete Entry
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.optionButton, styles.optionButtonCancel]}
+              onPress={closeTransactionMenu}>
+              <View style={styles.optionItemRow}>
+                <Icon name="close" size={20} color={colors.text.secondary} />
+                <Text style={styles.optionTextCancel}>Cancel</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
+
+      {/* Edit Amount Modal */}
+      <Modal
+        visible={editAmountVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditAmountVisible(false)}>
+        <View style={styles.promptOverlay}>
+          <TouchableOpacity
+            style={styles.promptBackdrop}
+            activeOpacity={1}
+            onPress={() => setEditAmountVisible(false)}
+          />
+          <View style={styles.editModalCard}>
+            <Text style={styles.editModalTitle}>Edit Amount</Text>
+            <TextInput
+              style={styles.editModalInput}
+              value={editAmount}
+              onChangeText={setEditAmount}
+              keyboardType="numeric"
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={[styles.editModalButton, loading && styles.buttonDisabled]}
+              onPress={handleSaveEditAmount}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.editModalButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Remark Modal */}
+      <Modal
+        visible={editRemarkVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditRemarkVisible(false)}>
+        <View style={styles.promptOverlay}>
+          <TouchableOpacity
+            style={styles.promptBackdrop}
+            activeOpacity={1}
+            onPress={() => setEditRemarkVisible(false)}
+          />
+          <View style={styles.editModalCard}>
+            <Text style={styles.editModalTitle}>Edit Remark</Text>
+            <TextInput
+              style={styles.editModalInput}
+              value={editRemark}
+              onChangeText={setEditRemark}
+              placeholder="Add a remark"
+              placeholderTextColor={colors.text.light}
+              editable={!loading}
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.editModalButton, loading && styles.buttonDisabled]}
+              onPress={handleSaveEditRemark}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.editModalButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Transaction Modal */}
       <Modal
@@ -865,7 +1699,8 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
           </View>
         </View>
       </Modal>
-    </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -873,6 +1708,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  content: {
+    flex: 1,
   },
   headerBlock: {
     backgroundColor: colors.white,
@@ -905,9 +1743,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'flex-end',
     padding: spacing.md,
-    paddingBottom: 120,
+    paddingBottom: spacing.md,
   },
   contactCard: {
     backgroundColor: colors.white,
@@ -976,7 +1813,7 @@ const styles = StyleSheet.create({
   },
   historySection: {
     marginTop: spacing.lg,
-    marginBottom: spacing.xl,
+    marginBottom: 0,
   },
   chatList: {
     gap: spacing.md,
@@ -1068,6 +1905,73 @@ const styles = StyleSheet.create({
     fontSize: fontSize.small,
     color: colors.text.secondary,
   },
+  chatMessageText: {
+    fontSize: fontSize.medium,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  chatBubbleSent: {
+    backgroundColor: '#DCF8C6',
+    alignSelf: 'flex-end',
+  },
+  chatBubbleReceived: {
+    backgroundColor: '#E8E8E8',
+    alignSelf: 'flex-start',
+  },
+  chatInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.white,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.sm,
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.medium,
+    maxHeight: 100,
+    color: colors.text.primary,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: '#FFF3CD',
+    borderTopWidth: 1,
+    borderTopColor: '#FFE69C',
+  },
+  inviteText: {
+    fontSize: fontSize.small,
+    color: '#856404',
+    flex: 1,
+  },
+  inviteButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: '#FFC107',
+    borderRadius: 8,
+  },
+  inviteButtonText: {
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
+    color: '#856404',
+  },
   emptyHistory: {
     backgroundColor: colors.white,
     borderRadius: 12,
@@ -1080,56 +1984,48 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   bottomButtons: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+    gap: spacing.md,
     backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    gap: spacing.sm,
   },
   actionButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.white,
     paddingVertical: spacing.md,
-    borderRadius: 12,
-    gap: spacing.xs,
-    elevation: 2,
-    shadowColor: colors.black,
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderRadius: 999,
+    gap: 6,
+    borderWidth: 1,
+    zIndex: 999,
   },
   paidButton: {
     backgroundColor: colors.white,
-    borderWidth: 1,
     borderColor: '#EF4444',
-    elevation: 0,
-    shadowOpacity: 0,
-    shadowRadius: 0,
   },
   getButton: {
     backgroundColor: colors.white,
-    borderWidth: 1,
     borderColor: '#10B981',
-    elevation: 0,
-    shadowOpacity: 0,
-    shadowRadius: 0,
   },
   actionButtonText: {
-    fontSize: fontSize.regular,
-    fontWeight: fontWeight.bold,
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
     color: colors.text.primary,
   },
   paidButtonText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
     color: '#EF4444',
   },
   getButtonText: {
+    fontSize: fontSize.medium,
+    fontWeight: fontWeight.semibold,
     color: '#10B981',
   },
   modalOverlay: {
@@ -1139,6 +2035,73 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
+  },
+  optionsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  optionsOverlayTouchable: {
+    flex: 1,
+  },
+  optionsContainer: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: spacing.lg,
+    elevation: 10,
+    shadowColor: colors.black,
+    shadowOffset: {width: 0, height: -4},
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  optionsHeader: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  optionsTitle: {
+    fontSize: fontSize.large,
+    fontWeight: fontWeight.bold,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  optionButton: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  optionItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  optionText: {
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.medium,
+    color: colors.text.primary,
+  },
+  optionTextDisabled: {
+    color: colors.text.light,
+  },
+  optionDelete: {
+    backgroundColor: 'transparent',
+  },
+  optionDeleteText: {
+    color: '#B91C1C',
+  },
+  optionButtonDisabled: {
+    opacity: 0.6,
+  },
+  optionButtonCancel: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    marginTop: spacing.sm,
+  },
+  optionTextCancel: {
+    fontSize: fontSize.regular,
+    fontWeight: fontWeight.medium,
+    color: colors.text.secondary,
   },
   modalContainer: {
     backgroundColor: colors.white,

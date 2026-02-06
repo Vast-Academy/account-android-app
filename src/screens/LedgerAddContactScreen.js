@@ -45,7 +45,7 @@ const ContactRow = React.memo(function ContactRow({item, isAppUser, onAdd, onInv
 
   return (
     <Pressable
-      onPress={() => (isAppUser ? onAdd(item) : onInvite(item))}
+      onPress={() => onAdd(item)}
       android_ripple={{color: 'rgba(0,0,0,0.06)'}}
       style={({pressed}) => [
         styles.modalContactRow,
@@ -66,13 +66,7 @@ const ContactRow = React.memo(function ContactRow({item, isAppUser, onAdd, onInv
         </Text>
       </View>
       <View style={styles.contactAction}>
-        {isAppUser ? (
-          <Icon name="add-circle-outline" size={20} color={colors.primary} />
-        ) : (
-          <View style={styles.inviteButton}>
-            <Text style={styles.inviteButtonText}>Invite</Text>
-          </View>
-        )}
+        <Icon name="add-circle-outline" size={20} color={colors.primary} />
       </View>
     </Pressable>
   );

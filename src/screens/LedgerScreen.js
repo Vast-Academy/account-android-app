@@ -242,10 +242,7 @@ const LedgerScreen = ({navigation}) => {
       }
     };
     if (contactsHydrated) {
-      const contactIdSet = new Set(contacts.map(c => String(c.recordID)));
-      const missingDbIds = dbContactIds.filter(id => !contactIdSet.has(String(id)));
-      const shouldSkipPersist =
-        dbContactIds.length > 0 && (contacts.length === 0 || missingDbIds.length > 0);
+      const shouldSkipPersist = dbContactIds.length > 0 && contacts.length === 0;
 
       if (!shouldSkipPersist) {
         persistContacts();
@@ -303,13 +300,46 @@ const LedgerScreen = ({navigation}) => {
 
     const contactWithName = { ...contact, savedName: displayName || null };
 
+    let nextContacts = null;
     setContacts(prev => {
-      if (prev.some(item => item.recordID === contact.recordID)) {
+      const incomingId = String(contact.recordID);
+      if (prev.some(item => String(item.recordID) === incomingId)) {
+        nextContacts = prev;
         return prev;
       }
       const next = [...prev, contactWithName];
-      return sortContactsByPinned(next, pinnedContactIds, latestTransactionDates);
+      const sorted = sortContactsByPinned(next, pinnedContactIds, latestTransactionDates);
+      nextContacts = sorted;
+      return sorted;
     });
+
+    // Persist immediately so contact survives refresh
+    try {
+      const phone = contact.phoneNumbers?.find(item =>
+        String(item.number || '').trim()
+      )?.number;
+      const payload = {
+        recordID: contact.recordID,
+        displayName: contact.displayName || '',
+        givenName: contact.givenName || '',
+        familyName: contact.familyName || '',
+        phoneNumbers: phone ? [{number: phone}] : [],
+        isAppUser: contact.isAppUser ? 1 : 0,
+        userId: contact.userId || '',
+        username: contact.username || '',
+      };
+      const existingRaw = await AsyncStorage.getItem(CONTACTS_STORAGE_KEY);
+      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      const nextStored = Array.isArray(existing)
+        ? existing.filter(item => String(item.recordID) !== String(contact.recordID)).concat(payload)
+        : [payload];
+      await AsyncStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(nextStored));
+      queueBackupFromStorage();
+    } catch (error) {
+      console.error('Failed to persist added contact:', error);
+    }
+
+    await loadBalances(nextContacts || contacts);
     showToast('Contact added successfully', 'success');
   };
 

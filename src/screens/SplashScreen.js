@@ -3,8 +3,8 @@ import { View, Text, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { checkAuthStatus, getFirebaseToken } from '../utils/tokenManager';
 import { getUserDetails } from '../services/api';
-import { isSetupComplete } from '../services/userSetup';
 import {notificationService} from '../services/NotificationService';
+import { initMessagingService } from '../services/messagingService';
 
 const SplashScreen = ({ navigation }) => {
   const checkAuthentication = useCallback(async () => {
@@ -19,6 +19,15 @@ const SplashScreen = ({ navigation }) => {
       const authStatus = await checkAuthStatus();
 
       if (authStatus.isAuthenticated) {
+        // Initialize messaging service to ensure FCM token is set up
+        console.log('🔔 Initializing messaging service on splash...');
+        try {
+          await initMessagingService();
+          console.log('✅ Messaging service initialized on splash');
+        } catch (msgError) {
+          console.warn('⚠️ Failed to initialize messaging service on splash:', msgError);
+        }
+
         let userData = authStatus.user || {};
 
         // Fetch fresh user data from backend to ensure we have latest profile info
@@ -40,36 +49,13 @@ const SplashScreen = ({ navigation }) => {
           // Continue with cached data if backend fetch fails
         }
 
-        const name = String(userData?.displayName || userData?.name || '').trim();
-        const phone = String(
-          userData?.phoneNumber || userData?.mobile || ''
-        ).trim();
-        const currency = String(
-          userData?.currencySymbol ||
-            userData?.currency ||
-            userData?.currency_symbol ||
-            ''
-        ).trim();
-
-        if (!currency) {
-          navigation.replace('CurrencySetup', { user: userData });
-          return;
-        }
-
-        if (!name || !phone) {
-          navigation.replace('ProfileSetup', { user: userData });
-          return;
-        }
-
-        // Check if initial setup is complete (e.g., first earning account created)
-        const setupCompleted = isSetupComplete();
-
-        if (!setupCompleted) {
-          // User is logged in but setup not complete, go to Home with tutorial flag
-          navigation.replace('Home', { user: userData, showTutorial: true });
+        // Check cloud setupComplete flag from user profile
+        if (userData.setupComplete === true) {
+          // Profile setup complete → Go to Home
+          navigation.replace('Home', { user: userData });
         } else {
-          // User is logged in and setup complete, go to Home normally
-          navigation.replace('Home', { user: userData, showTutorial: false });
+          // Profile setup incomplete → Go to ProfileSetup
+          navigation.replace('ProfileSetup', { user: userData });
         }
       } else {
         // User not logged in, go to Login

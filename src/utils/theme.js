@@ -12,6 +12,8 @@ export const colors = {
   border: '#dddddd',
   error: '#FF3B30',
   success: '#34C759',
+  brandGreenLight: '#34C759',
+  brandGreenDark: '#0F6B3C',
   warning: '#FF9500',
   headerBg: '#ffffff',
   tabBarBg: '#ffffff',

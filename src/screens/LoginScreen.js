@@ -15,18 +15,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveFirebaseToken } from '../utils/tokenManager';
 import {ensureDriveScopes} from '../services/driveService';
 import {findLatestBackupFile, restoreFromBackup} from '../services/backupService';
+import { initMessagingService } from '../services/messagingService';
 import RNRestart from 'react-native-restart';
 
 const LoginScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const normalizeUser = rawUser => {
     const normalized = {...rawUser};
-    const name = String(
-      normalized.displayName || normalized.name || ''
-    ).trim();
-    const phone = String(
-      normalized.phoneNumber || normalized.mobile || ''
-    ).trim();
     const currencySymbol =
       normalized.currencySymbol ||
       normalized.currency ||
@@ -40,15 +35,6 @@ const LoginScreen = ({ navigation }) => {
     }
     if (!normalized.currencySymbol && currencySymbol) {
       normalized.currencySymbol = currencySymbol;
-    }
-    if (
-      normalized.setupComplete === undefined ||
-      normalized.setupComplete === null
-    ) {
-      const hasCurrency = Boolean(currencySymbol);
-      if (name && phone && hasCurrency) {
-        normalized.setupComplete = true;
-      }
     }
     return normalized;
   };
@@ -65,20 +51,38 @@ const LoginScreen = ({ navigation }) => {
       console.log('=== STEP 1: Starting Google Sign-In ===');
 
       // Check if device supports Google Play
-      await GoogleSignin.hasPlayServices();
-      console.log('=== STEP 2: Play Services Available ===');
+      try {
+        await GoogleSignin.hasPlayServices();
+        console.log('=== STEP 2: Play Services Available ===');
+      } catch (playServicesError) {
+        console.error('❌ STEP 2 FAILED: Google Play Services not available');
+        console.error('Error:', playServicesError.message || JSON.stringify(playServicesError));
+        throw playServicesError;
+      }
 
       // Ensure chooser shows by clearing any cached Google session
       try {
         await GoogleSignin.signOut();
+        console.log('Previous session cleared');
       } catch (signOutError) {
+        console.log('⚠️ Sign-out warning (ignored):', signOutError.message);
         // Ignore sign-out errors and continue with sign-in
       }
 
       // Sign in with Google
-      const userInfo = await GoogleSignin.signIn();
-      console.log('=== STEP 3: Google Sign-In Response ===');
-      console.log('Full userInfo object:', JSON.stringify(userInfo, null, 2));
+      console.log('🔵 Attempting Google Sign-In...');
+      let userInfo;
+      try {
+        userInfo = await GoogleSignin.signIn();
+        console.log('=== STEP 3: Google Sign-In Response ===');
+        console.log('Full userInfo object:', JSON.stringify(userInfo, null, 2));
+      } catch (signInError) {
+        console.error('❌ STEP 3 FAILED: Google Sign-In failed');
+        console.error('Error message:', signInError.message);
+        console.error('Error code:', signInError.code);
+        console.error('Full error:', JSON.stringify(signInError));
+        throw signInError;
+      }
 
       // Extract data from new response structure
       const { idToken: googleIdToken } = userInfo.data || userInfo;
@@ -96,34 +100,40 @@ const LoginScreen = ({ navigation }) => {
 
       console.log('=== STEP 4: Creating Firebase Credential ===');
       // Sign in to Firebase
-      const googleCredential = auth.GoogleAuthProvider.credential(
-        googleIdToken,
-      );
-      console.log('Firebase credential created:', googleCredential);
+      try {
+        const googleCredential = auth.GoogleAuthProvider.credential(
+          googleIdToken,
+        );
+        console.log('✅ Firebase credential created');
 
-      console.log('=== STEP 5: Signing in to Firebase ===');
-      const firebaseAuthResult = await auth().signInWithCredential(googleCredential);
-      console.log('Firebase sign-in successful:', firebaseAuthResult);
+        console.log('=== STEP 5: Signing in to Firebase ===');
+        const firebaseAuthResult = await auth().signInWithCredential(googleCredential);
+        console.log('✅ Firebase sign-in successful');
 
-      // Get Firebase ID token
-      console.log('=== STEP 6: Getting Firebase User ===');
-      const firebaseUser = auth().currentUser;
-      console.log('Firebase user:', firebaseUser ? firebaseUser.uid : 'null');
+        // Get Firebase ID token
+        console.log('=== STEP 6: Getting Firebase User ===');
+        const firebaseUser = auth().currentUser;
+        console.log('✅ Firebase user:', firebaseUser ? firebaseUser.uid : 'null');
 
-      const firebaseIdToken = await firebaseUser.getIdToken();
-      console.log('=== STEP 7: Got Firebase ID Token ===');
+        const firebaseIdToken = await firebaseUser.getIdToken();
+        console.log('=== STEP 7: Got Firebase ID Token ===');
 
-      // Save Firebase token
-      await saveFirebaseToken(firebaseIdToken);
-      await AsyncStorage.setItem('firebaseUid', firebaseUser.uid);
-      console.log('=== STEP 8: Saved tokens locally ===');
+        // Save Firebase token
+        await saveFirebaseToken(firebaseIdToken);
+        await AsyncStorage.setItem('firebaseUid', firebaseUser.uid);
+        console.log('=== STEP 8: Saved tokens locally ===');
 
-      // Send to backend
-      console.log('=== STEP 9: Sending to backend ===');
-      const response = await googleSignIn(firebaseIdToken);
-      console.log('Backend response:', response);
+        // Send to backend
+        console.log('=== STEP 9: Sending to backend ===');
+        const response = await googleSignIn(firebaseIdToken);
+        console.log('✅ Backend response:', response);
 
-      if (response.success) {
+        if (!response.success) {
+          console.error('❌ Backend returned error:', response.message);
+          throw new Error(response.message || 'Backend authentication failed');
+        }
+
+        // Handle successful authentication
         await AsyncStorage.setItem('backup.restorePending', 'true');
 
         let resolvedUser = response.user;
@@ -151,33 +161,29 @@ const LoginScreen = ({ navigation }) => {
           await AsyncStorage.setItem('backup.enabled', 'true');
         }
 
-        const hasCurrency = Boolean(
-          normalizedUser.currencySymbol ||
-            normalizedUser.currency ||
-            normalizedUser.currency_symbol
-        );
-        const hasBasicDetails = Boolean(
-          String(normalizedUser.displayName || normalizedUser.name || '').trim()
-        ) && Boolean(
-          String(
-            normalizedUser.phoneNumber || normalizedUser.mobile || ''
-          ).trim()
-        );
+        // Initialize messaging service to get FCM token
+        console.log('🔔 Initializing messaging service for FCM token...');
+        try {
+          await initMessagingService();
+          console.log('✅ Messaging service initialized successfully');
+        } catch (msgError) {
+          console.warn('⚠️ Failed to initialize messaging service:', msgError);
+          // Continue even if messaging init fails
+        }
 
-        // Check for restore, then navigate
+        // Check for restore, then navigate based on setupComplete flag
         const restored = await promptRestoreIfAvailable(normalizedUser);
         if (!restored) {
           await AsyncStorage.setItem('backup.restorePending', 'false');
-          if (!hasCurrency) {
-            navigation.replace('CurrencySetup', { user: normalizedUser });
-            return;
-          }
-          if (!hasBasicDetails) {
+          if (normalizedUser.setupComplete === true) {
+            navigation.replace('Home', { user: normalizedUser });
+          } else {
             navigation.replace('ProfileSetup', { user: normalizedUser });
-            return;
           }
-          navigation.replace('Home', { user: normalizedUser });
         }
+      } catch (firebaseError) {
+        console.error('❌ Firebase/Backend error:', firebaseError.message);
+        throw firebaseError;
       }
     } catch (error) {
       console.error('=== GOOGLE SIGN-IN ERROR ===');
