@@ -13,8 +13,19 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/context/ToastContext';
 import ToastContainer from './src/components/ToastContainer';
 import './src/services/NotificationService';
-import { processPendingLedgerEvents } from './src/services/ledgerSyncService';
+import {processPendingLedgerEvents} from './src/services/ledgerSyncService';
 // import { initializeChatFeature } from './src/services/chatInitializer';
+
+const keyboardModule = (() => {
+  try {
+    return require('react-native-keyboard-controller/lib/commonjs/animated');
+  } catch {
+    return null;
+  }
+})();
+
+const KeyboardProvider: React.ComponentType<React.PropsWithChildren<object>> =
+  keyboardModule?.KeyboardProvider ?? (({ children }) => <>{children}</>);
 
 enableScreens(true);
 
@@ -34,15 +45,17 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      {/* <ChatStoreProvider> */}
-      <ToastProvider>
-        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top', 'bottom']}>
-          <AppNavigator />
-          <ToastContainer />
-        </SafeAreaView>
-      </ToastProvider>
-      {/* </ChatStoreProvider> */}
+      <KeyboardProvider>
+        {/* <ChatStoreProvider> */}
+        <ToastProvider>
+          <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top', 'bottom']}>
+            <AppNavigator />
+            <ToastContainer />
+          </SafeAreaView>
+        </ToastProvider>
+        {/* </ChatStoreProvider> */}
+      </KeyboardProvider>
     </SafeAreaProvider>
   );
 }

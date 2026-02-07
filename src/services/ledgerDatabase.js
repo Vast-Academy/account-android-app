@@ -516,10 +516,18 @@ export const initLedgerDatabase = () => {
           const merged = [...transactionItems, ...messageItems];
           merged.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-          return merged.slice(offset, offset + limit);
+          // Keep the latest window (not the oldest) so newest messages never disappear.
+          const safeOffset = Math.max(0, Number(offset) || 0);
+          const safeLimit = Math.max(1, Number(limit) || 50);
+          const endIndex = Math.max(0, merged.length - safeOffset);
+          const startIndex = Math.max(0, endIndex - safeLimit);
+
+          return merged.slice(startIndex, endIndex);
         } catch (error) {
           console.error('Failed to get unified timeline:', error);
           return [];
         }
       };
+
+
 

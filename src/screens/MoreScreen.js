@@ -34,6 +34,7 @@ import CollapsibleSection from '../components/CollapsibleSection';
 import CollapsibleMenuItem from '../components/CollapsibleMenuItem';
 import {updateProfile} from '../services/api';
 import {useToast} from '../hooks/useToast';
+import {COUNTRIES} from '../utils/countries';
 
 const OCCUPATION_OPTIONS = [
   {label: 'Business Owner', value: 'Business Owner'},
@@ -228,6 +229,37 @@ const normalizeImageUri = uri => {
   return `file://${uri}`;
 };
 
+const stripToDigits = value => String(value || '').replace(/\D/g, '');
+
+const getCountryDialCode = countryCode => {
+  const countryObj = COUNTRIES.find(country => country.code === countryCode);
+  return countryObj?.dialCode || '+91';
+};
+
+const resolveCountryFromPhone = phone => {
+  const digits = stripToDigits(phone);
+  if (!digits) {
+    return null;
+  }
+  const sorted = [...COUNTRIES].sort(
+    (a, b) =>
+      stripToDigits(b.dialCode).length - stripToDigits(a.dialCode).length,
+  );
+  const match = sorted.find(country =>
+    digits.startsWith(stripToDigits(country.dialCode)),
+  );
+  return match?.code || null;
+};
+
+const getLocalPhoneNumber = (phone, dialCode) => {
+  const digits = stripToDigits(phone);
+  const codeDigits = stripToDigits(dialCode);
+  if (codeDigits && digits.startsWith(codeDigits) && digits.length > codeDigits.length) {
+    return digits.slice(codeDigits.length);
+  }
+  return digits;
+};
+
 const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const routeUser = route.params?.user;
   const openProfileOnFocus = route.params?.openProfileOnFocus;
@@ -240,11 +272,18 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const [draftName, setDraftName] = React.useState('');
   const [draftPhoto, setDraftPhoto] = React.useState('');
   const [draftPhoneNumber, setDraftPhoneNumber] = React.useState('');
+  const [selectedCountry, setSelectedCountry] = React.useState('IN');
+  const [countryCode, setCountryCode] = React.useState('+91');
+  const [showCountryPicker, setShowCountryPicker] = React.useState(false);
+  const [phoneError, setPhoneError] = React.useState('');
   const [draftGender, setDraftGender] = React.useState('');
+  const [draftUsername, setDraftUsername] = React.useState('');
+  const [draftBio, setDraftBio] = React.useState('');
   const [occupationChoice, setOccupationChoice] = React.useState('');
   const [manualOccupation, setManualOccupation] = React.useState('');
   const [occupationModalVisible, setOccupationModalVisible] =
     React.useState(false);
+  const [genderModalVisible, setGenderModalVisible] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [photoPreviewVisible, setPhotoPreviewVisible] = React.useState(false);
   const slideX = React.useRef(new Animated.Value(0)).current;
@@ -255,6 +294,11 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const slideInDirectionRef = React.useRef('right');
   const profileVisibleRef = React.useRef(false);
   const profileBackRef = React.useRef(() => {});
+
+  React.useEffect(() => {
+    const dialCode = getCountryDialCode(selectedCountry);
+    setCountryCode(dialCode);
+  }, [selectedCountry]);
   const openedProfileFromPromptRef = React.useRef(false);
   const panResponder = React.useRef(
     PanResponder.create({
@@ -423,12 +467,25 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       setOccupationChoice('');
       setManualOccupation('');
     }
+    const inferredCountry =
+      profileUser?.country ||
+      resolveCountryFromPhone(profileUser?.phoneNumber || profileUser?.mobile) ||
+      'IN';
+    const dialCode = getCountryDialCode(inferredCountry);
     setDraftName(profileUser?.displayName || profileUser?.name || '');
     setDraftPhoto(normalizeImageUri(profileUser?.photoURL || ''));
+    setPhoneError('');
+    setSelectedCountry(inferredCountry);
+    setCountryCode(dialCode);
     setDraftPhoneNumber(
-      profileUser?.phoneNumber || profileUser?.mobile || ''
+      getLocalPhoneNumber(
+        profileUser?.phoneNumber || profileUser?.mobile || '',
+        dialCode,
+      ),
     );
     setDraftGender(profileUser?.gender || '');
+    setDraftUsername(profileUser?.username || '');
+    setDraftBio(profileUser?.bio || '');
     setProfileVisible(true);
     profileSlideX.setValue(screenWidth);
     Animated.timing(profileSlideX, {
@@ -442,6 +499,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   const closeProfile = React.useCallback(() => {
     setPhotoPreviewVisible(false);
     setOccupationModalVisible(false);
+    setGenderModalVisible(false);
     Animated.timing(profileSlideX, {
       toValue: screenWidth,
       duration: 200,
@@ -491,17 +549,31 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       return;
     }
 
+    if (!selectedCountry) {
+      Alert.alert('Error', 'Please select a country');
+      return;
+    }
+
     if (!draftPhoneNumber.trim()) {
       Alert.alert('Error', 'Please enter a phone number');
       return;
     }
 
-    // Validate mobile number
-    if (!/^\d{10}$/.test(draftPhoneNumber.trim())) {
-      Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
+    const cleanedPhone = draftPhoneNumber.replace(/[\s\-\(\)]/g, '');
+    if (!/^\d+$/.test(cleanedPhone)) {
+      setPhoneError('Phone number can only contain digits, spaces, and dashes');
+      Alert.alert('Error', 'Phone number can only contain digits, spaces, and dashes');
       return;
     }
 
+    if (cleanedPhone.length < 7) {
+      const errorMessage = `Phone number must be at least 7 digits for ${selectedCountry}`;
+      setPhoneError(errorMessage);
+      Alert.alert('Error', errorMessage);
+      return;
+    }
+
+    setPhoneError('');
     setSaving(true);
     try {
       const occupationValue =
@@ -519,11 +591,15 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
       }
 
       // Call backend API to update profile
+      const fullPhoneNumber = `${countryCode}${cleanedPhone}`;
+
       const response = await updateProfile(firebaseUid, {
         displayName: draftName.trim(),
-        mobile: draftPhoneNumber.trim() || null,
+        mobile: fullPhoneNumber || null,
+        country: selectedCountry,
         gender: draftGender || null,
         occupation: occupationValue || null,
+        bio: draftBio.trim() || null,
         setupComplete: true, // Mark setup as complete
       });
 
@@ -541,8 +617,10 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
           ...response.user,
           displayName: draftName.trim(),
           photoURL: normalizedPhoto,
-          phoneNumber: draftPhoneNumber.trim(),
-          mobile: draftPhoneNumber.trim(),
+          phoneNumber: fullPhoneNumber,
+          mobile: fullPhoneNumber,
+          country: selectedCountry,
+          bio: draftBio.trim() || null,
           setupComplete: true,
         };
 
@@ -580,23 +658,34 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
   };
 
   const hasProfileChanges = () => {
+    const currentCountry = currentUser?.country || 'IN';
+    const currentDialCode = getCountryDialCode(currentCountry);
+    const currentLocalPhone = getLocalPhoneNumber(
+      currentUser?.phoneNumber || currentUser?.mobile || '',
+      currentDialCode,
+    );
     const nameChanged =
       draftName.trim() !== String(currentUser?.displayName || '').trim();
     const photoChanged =
       normalizeImageUri(draftPhoto || '') !==
       normalizeImageUri(currentUser?.photoURL || '');
     const phoneChanged =
-      draftPhoneNumber.trim() !== String(currentUser?.phoneNumber || '').trim();
+      stripToDigits(draftPhoneNumber) !== stripToDigits(currentLocalPhone);
+    const countryChanged = selectedCountry !== currentCountry;
     const genderChanged =
       draftGender !== String(currentUser?.gender || '');
     const occupationChanged =
       getDraftOccupationValue() !== String(currentUser?.occupation || '');
+    const bioChanged =
+      draftBio.trim() !== String(currentUser?.bio || '').trim();
     return (
       nameChanged ||
       photoChanged ||
       phoneChanged ||
+      countryChanged ||
       genderChanged ||
-      occupationChanged
+      occupationChanged ||
+      bioChanged
     );
   };
 
@@ -783,6 +872,9 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
 
   const profilePhotoUri = normalizeImageUri(currentUser?.photoURL || '');
   const draftPhotoUri = normalizeImageUri(draftPhoto || '');
+  const selectedCountryObj = COUNTRIES.find(
+    country => country.code === selectedCountry,
+  );
 
   return (
     <View style={styles.container}>
@@ -823,7 +915,7 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               <Text style={styles.profileEmail}>{currentUser?.email || ''}</Text>
             </View>
             <Icon
-              name="chevron-forward"
+              name="pencil"
               size={20}
               color={colors.text.light}
               style={styles.profileArrow}
@@ -930,6 +1022,13 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               editable={false}
             />
 
+            <Text style={styles.profileLabel}>Username</Text>
+            <TextInput
+              style={[styles.profileInput, styles.profileInputDisabled]}
+              value={draftUsername}
+              editable={false}
+            />
+
             <Text style={styles.profileLabel}>Name</Text>
             <TextInput
               style={styles.profileInput}
@@ -939,25 +1038,40 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
               editable={!saving}
             />
 
+            <Text style={styles.profileLabel}>Country</Text>
+            <TouchableOpacity
+              style={styles.occupationPicker}
+              onPress={() => setShowCountryPicker(true)}
+              disabled={saving}>
+              <Text style={styles.occupationPickerText}>
+                {selectedCountryObj?.name || selectedCountry} ({selectedCountry}) {countryCode}
+              </Text>
+              <Icon
+                name="chevron-down"
+                size={18}
+                color={colors.text.secondary}
+              />
+            </TouchableOpacity>
+
             <Text style={styles.profileLabel}>Phone Number</Text>
             <TextInput
               style={styles.profileInput}
               value={draftPhoneNumber}
-              onChangeText={setDraftPhoneNumber}
+              onChangeText={text => {
+                setDraftPhoneNumber(text);
+                setPhoneError('');
+              }}
               placeholder="Enter your phone number"
               keyboardType="phone-pad"
               editable={!saving}
             />
+            {phoneError ? (
+              <Text style={styles.profileErrorText}>{phoneError}</Text>
+            ) : null}
             <Text style={styles.profileLabel}>Gender</Text>
             <TouchableOpacity
               style={styles.occupationPicker}
-              onPress={() => {
-                Alert.alert('Gender', 'Select your gender', [
-                  {text: 'Male', onPress: () => setDraftGender('Male')},
-                  {text: 'Female', onPress: () => setDraftGender('Female')},
-                  {text: 'Other', onPress: () => setDraftGender('Other')},
-                ]);
-              }}>
+              onPress={() => setGenderModalVisible(true)}>
               <Text style={styles.occupationPickerText}>
                 {draftGender || 'Select gender'}
               </Text>
@@ -992,6 +1106,18 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                 editable={!saving}
               />
             )}
+
+            <Text style={styles.profileLabel}>Bio</Text>
+            <TextInput
+              style={[styles.profileInput, styles.profileInputBio]}
+              value={draftBio}
+              onChangeText={setDraftBio}
+              placeholder="Tell us about yourself (max 150 characters)"
+              editable={!saving}
+              multiline
+              maxLength={150}
+            />
+            <Text style={styles.bioCharCount}>{draftBio.length}/150</Text>
 
             <TouchableOpacity
               style={[
@@ -1066,6 +1192,93 @@ const MoreScreen = ({navigation, route, user, onProfileUpdate}) => {
                         isSelected && styles.dropdownOptionTextActive,
                       ]}>
                       {option.label}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <Icon name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </BottomSheet>
+
+          <BottomSheet
+            visible={showCountryPicker}
+            onClose={() => setShowCountryPicker(false)}>
+            <Text style={styles.bottomSheetTitle}>Select Country</Text>
+            {COUNTRIES.map(country => {
+              const isSelected = selectedCountry === country.code;
+              return (
+                <TouchableOpacity
+                  key={country.code}
+                  style={[
+                    styles.dropdownOption,
+                    isSelected && styles.dropdownOptionActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedCountry(country.code);
+                    setShowCountryPicker(false);
+                  }}>
+                  <View style={styles.dropdownOptionRow}>
+                    <View style={styles.dropdownOptionIcon}>
+                      <Icon
+                        name="flag-outline"
+                        size={18}
+                        color={colors.text.secondary}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.dropdownOptionText,
+                        isSelected && styles.dropdownOptionTextActive,
+                      ]}>
+                      {country.name} ({country.code}) {country.dialCode}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <Icon name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </BottomSheet>
+
+          <BottomSheet
+            visible={genderModalVisible}
+            onClose={() => setGenderModalVisible(false)}>
+            <Text style={styles.bottomSheetTitle}>Select Gender</Text>
+            {['Male', 'Female', 'Other'].map(gender => {
+              const isSelected = draftGender === gender;
+              const genderIcons = {
+                Male: 'male-outline',
+                Female: 'female-outline',
+                Other: 'help-circle-outline',
+              };
+              return (
+                <TouchableOpacity
+                  key={gender}
+                  style={[
+                    styles.dropdownOption,
+                    isSelected && styles.dropdownOptionActive,
+                  ]}
+                  onPress={() => {
+                    setDraftGender(gender);
+                    setGenderModalVisible(false);
+                  }}>
+                  <View style={styles.dropdownOptionRow}>
+                    <View style={styles.dropdownOptionIcon}>
+                      <Icon
+                        name={genderIcons[gender]}
+                        size={18}
+                        color={colors.text.secondary}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.dropdownOptionText,
+                        isSelected && styles.dropdownOptionTextActive,
+                      ]}>
+                      {gender}
                     </Text>
                   </View>
                   {isSelected && (
@@ -1233,17 +1446,24 @@ const styles = StyleSheet.create({
   },
   profileContent: {
     padding: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
   },
   profileImageFrame: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 1,
-    borderColor: colors.border,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 3,
+    borderColor: colors.primary,
     backgroundColor: colors.white,
     overflow: 'hidden',
     alignSelf: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.lg,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
   },
   profileImageButton: {
     flex: 1,
@@ -1275,33 +1495,54 @@ const styles = StyleSheet.create({
   },
   profileLabel: {
     fontSize: fontSize.small,
+    fontWeight: fontWeight.semibold,
     color: colors.text.secondary,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    marginTop: spacing.md,
+    textTransform: 'capitalize',
+    letterSpacing: 0.3,
   },
   profileInput: {
-    borderWidth: 0,
-    borderBottomWidth: 1,
+    borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     fontSize: fontSize.regular,
     color: colors.text.primary,
     marginBottom: spacing.md,
-    backgroundColor: 'transparent',
+    backgroundColor: colors.white,
   },
   profileInputDisabled: {
     color: colors.text.secondary,
-    opacity: 0.8,
+    opacity: 0.7,
+    backgroundColor: '#F9F9F9',
+  },
+  profileInputBio: {
+    minHeight: 90,
+    paddingVertical: spacing.md,
+    textAlignVertical: 'top',
+  },
+  profileErrorText: {
+    fontSize: fontSize.small,
+    color: colors.error,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
+  bioCharCount: {
+    fontSize: fontSize.small,
+    color: colors.text.secondary,
+    textAlign: 'right',
+    marginBottom: spacing.md,
+    marginTop: -spacing.sm,
   },
   occupationPicker: {
-    borderWidth: 0,
-    borderBottomWidth: 1,
+    borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 10,
-    backgroundColor: 'transparent',
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.white,
     marginBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1312,23 +1553,30 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     flex: 1,
     marginRight: spacing.sm,
+    fontWeight: fontWeight.medium,
   },
   profileSaveButton: {
-    backgroundColor: colors.white,
-    borderRadius: 8,
-    paddingVertical: 12,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
     alignItems: 'center',
-    marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 0,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
   },
   profileSaveButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   profileSaveText: {
-    color: colors.primary,
+    color: colors.white,
     fontSize: fontSize.regular,
-    fontWeight: fontWeight.semibold,
+    fontWeight: fontWeight.bold,
   },
   previewOverlay: {
     flex: 1,
@@ -1353,6 +1601,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  formSectionDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
   },
   bottomSheetTitle: {
     fontSize: fontSize.large,

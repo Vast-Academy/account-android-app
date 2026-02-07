@@ -10,11 +10,8 @@ import {
   TextInput,
   Alert,
   Animated,
-  Easing,
   Keyboard,
   ActivityIndicator,
-  DeviceEventEmitter,
-  BackHandler,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -22,19 +19,12 @@ import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing as ReanimatedEasing,
-} from 'react-native-reanimated';
 import {
   initLedgerDatabase,
   createTransaction as createLedgerTransaction,
   getTransactionsByContact,
   calculateContactBalance,
   getUnifiedTimeline,
-  getTransactionById as getLedgerTransactionById,
 } from '../services/ledgerDatabase';
 import {
   initAccountsDatabase,
@@ -52,7 +42,6 @@ import {
 import { sendMessageToUser } from '../services/messagingService';
 import { searchUsersByPhone, batchSearchUsers } from '../services/userProfileService';
 import {useChatStore} from '../context/ChatStore';
-import {buildLedgerCreateEvent, sendLedgerEvent} from '../services/ledgerSyncService';
 
 const LEDGER_GET_DEFAULT_MODE_KEY = 'ledgerGetDefaultMode';
 const LEDGER_GET_DEFAULT_PREFIX = 'ledgerGetDefault:';
@@ -62,8 +51,6 @@ const LEDGER_PAID_DEFAULT_PREFIX = 'ledgerPaidDefault:';
 const LEDGER_PAID_DEFAULT_DEBIT = 'debit';
 const LEDGER_PAID_DEFAULT_RECORD = 'record';
 const LEDGER_CHAT_CACHE_PREFIX = 'ledgerChatCache:';
-
-const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
 const LedgerContactDetailScreen = ({route, navigation}) => {
   const {contact} = route.params || {};
@@ -108,11 +95,10 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
-  const keyboardOffsetAnim = useRef(new Animated.Value(0)).current;
-  const keyboardOffsetRef = useRef(0);
-  const lastKnownKeyboardHeightRef = useRef(320);
-  const [shouldHideActionButtons, setShouldHideActionButtons] = useState(false);
-  const keyboardListInset = useSharedValue(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [chatInputHeight, setChatInputHeight] = useState(0);
+  const [bottomButtonsHeight, setBottomButtonsHeight] = useState(0);
+  const [inviteBannerHeight, setInviteBannerHeight] = useState(0);
   const chatStoreState = useChatStore();
   const conversationVersion = chatStoreState.conversationVersion?.[conversationId] || 0;
 
@@ -124,19 +110,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const amountInputRef = useRef(null);
   const noteInputRef = useRef(null);
   const chatInputRef = useRef(null);
-  const animateKeyboardOffset = (toValue, duration = 180) => {
-    keyboardOffsetRef.current = toValue;
-    keyboardOffsetAnim.stopAnimation();
-    Animated.timing(keyboardOffsetAnim, {
-      toValue,
-      duration,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  };
-  const animatedKeyboardSpacerStyle = useAnimatedStyle(() => ({
-    height: keyboardListInset.value,
-  }));
 
   useEffect(() => {
     if (optionsVisible) {
@@ -179,19 +152,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   }, []);
 
   useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('ledger:updated', payload => {
-      const incomingId = String(payload?.contactRecordId || '');
-      const currentId = String(contact?.recordID || '');
-      if (!incomingId || incomingId === currentId) {
-        loadData();
-      }
-    });
-
-    return () => sub.remove();
-  }, [contact?.recordID, conversationId]);
-
-
-  useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       loadData();
     });
@@ -215,56 +175,31 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   }, [conversationId, conversationVersion, isAppUser]);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', event => {
-      const nextHeight = event?.endCoordinates?.height || lastKnownKeyboardHeightRef.current || 320;
-      lastKnownKeyboardHeightRef.current = nextHeight;
-      keyboardListInset.value = withTiming(nextHeight, {
-        duration: 190,
-        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
-      });
-      animateKeyboardOffset(nextHeight, 190);
-      setShouldHideActionButtons(true);
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToOffset?.({offset: 0, animated: false});
-      });
+    const showListener = Keyboard.addListener('keyboardDidShow', event => {
+      setKeyboardHeight(event.endCoordinates?.height || 0);
     });
-
-    const willHideSub = Keyboard.addListener('keyboardWillHide', () => {
-      setShouldHideActionButtons(false);
+    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
     });
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
+  }, []);
 
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      setShouldHideActionButtons(false);
-      keyboardListInset.value = withTiming(0, {
-        duration: 180,
-        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
-      });
-      animateKeyboardOffset(0, 180);
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToOffset?.({offset: 0, animated: false});
-      });
+  useEffect(() => {
+    const focusReset = navigation.addListener('focus', () => {
+      setKeyboardHeight(0);
+    });
+    const blurReset = navigation.addListener('blur', () => {
+      setKeyboardHeight(0);
     });
 
     return () => {
-      showSub.remove();
-      willHideSub.remove();
-      hideSub.remove();
+      focusReset();
+      blurReset();
     };
-  }, [keyboardOffsetAnim]);
-
-  useEffect(() => {
-    const backSub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (chatInputRef.current?.isFocused?.()) {
-        setShouldHideActionButtons(false);
-        Keyboard.dismiss();
-        return true;
-      }
-      return false;
-    });
-
-    return () => backSub.remove();
-  }, []);
-
+  }, [navigation]);
   useEffect(() => {
     const loadGetDefault = async () => {
       try {
@@ -433,7 +368,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
 
     const resolved = resolveAppUserFromContact();
     if (resolved) {
-      console.log('âœ… [CHAT] Contact already has app user data:', resolved);
+      console.log('✅ [CHAT] Contact already has app user data:', resolved);
       setAppUser(resolved);
       setIsAppUser(true);
       await saveCachedChatIdentity({
@@ -463,10 +398,10 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     try {
       setLoadingChat(true);
       const phoneNumber = getContactPhone();
-      console.log('ðŸ” [CHAT] Extracted phone number (raw):', phoneNumber);
+      console.log('🔍 [CHAT] Extracted phone number (raw):', phoneNumber);
 
       if (!phoneNumber || phoneNumber === 'No phone number') {
-        console.log('âŒ [CHAT] No phone number found');
+        console.log('❌ [CHAT] No phone number found');
         setIsAppUser(false);
         setLoadingChat(false);
         return;
@@ -474,28 +409,28 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
 
       // Try multiple phone formats for better matching
       const normalizedPhone = normalizePhoneNumber(phoneNumber);
-      console.log('ðŸ” [CHAT] Normalized phone number:', normalizedPhone);
+      console.log('🔍 [CHAT] Normalized phone number:', normalizedPhone);
 
       if (!normalizedPhone) {
-        console.log('âŒ [CHAT] Phone number normalization failed');
+        console.log('❌ [CHAT] Phone number normalization failed');
         setIsAppUser(false);
         setLoadingChat(false);
         return;
       }
 
       // Try batch search with multiple formats
-      console.log('ðŸ” [CHAT] Searching for user with phones:', [phoneNumber, normalizedPhone, `+91${normalizedPhone}`]);
+      console.log('🔍 [CHAT] Searching for user with phones:', [phoneNumber, normalizedPhone, `+91${normalizedPhone}`]);
       const usersMap = await batchSearchUsers([
         phoneNumber,           // Original format: +919256537003
         normalizedPhone,       // Normalized: 9256537003
         `+91${normalizedPhone}`  // With country code: +919256537003
       ]);
-      console.log('ðŸ“± [CHAT] Search results map:', usersMap);
+      console.log('📱 [CHAT] Search results map:', usersMap);
       const users = Object.values(usersMap || {});
       const user = users && users.length > 0 ? users[0] : null;
 
       if (user) {
-        console.log('âœ… [CHAT] App user found:', user);
+        console.log('✅ [CHAT] App user found:', user);
         setAppUser(user);
         setIsAppUser(true);
         await saveCachedChatIdentity({
@@ -523,11 +458,11 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         // Load chat messages
         await loadUnifiedTimeline(convId);
       } else {
-        console.log('âŒ [CHAT] No app user found for phone:', phoneNumber);
+        console.log('❌ [CHAT] No app user found for phone:', phoneNumber);
         setIsAppUser(false);
       }
     } catch (error) {
-      console.error('âŒ [CHAT] Failed to map contact to user:', error);
+      console.error('❌ [CHAT] Failed to map contact to user:', error);
       setIsAppUser(false);
     } finally {
       setLoadingChat(false);
@@ -768,8 +703,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
     try {
       const amountValue = Number(amount);
       const resolvedGetMode = overrideGetMode || getMode;
-      const createdTxn = createLedgerTransaction(contact.recordID, amountValue, transactionType, note);
-
+      createLedgerTransaction(contact.recordID, amountValue, transactionType, note);
       if (transactionType === 'get' && resolvedGetMode === 'transfer') {
         const creditAccount = primaryEarningAccount || resolvePrimaryEarningAccount();
         if (!creditAccount) {
@@ -790,7 +724,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
           accountRemark
         );
       }
-
       if (transactionType === 'paid' && debitPrimaryAccount) {
         const debitAccount = primaryEarningAccount || resolvePrimaryEarningAccount();
         if (!debitAccount) {
@@ -811,24 +744,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
           accountRemark
         );
       }
-
-      const localTxnId = createdTxn?.insertId;
-      const remotePeerUserId = appUser?.firebaseUid || appUser?.userId || '';
-      if (isAppUser && localTxnId && currentUserId && remotePeerUserId) {
-        const localTxn = getLedgerTransactionById(localTxnId);
-        const eventPayload = buildLedgerCreateEvent({
-          originTxnId: localTxnId,
-          sourceUserId: currentUserId,
-          peerUserId: remotePeerUserId,
-          contactRecordId: contact?.recordID,
-          type: transactionType,
-          amount: amountValue,
-          note,
-          timestamp: localTxn?.transaction_date || Date.now(),
-        });
-        await sendLedgerEvent(eventPayload);
-      }
-
       closeTransactionModal();
       loadData();
       if (transactionType === 'get' && resolvedGetMode === 'transfer') {
@@ -1221,7 +1136,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       </View>
     );
   };
-
   return (
     <View style={styles.container}>
       <View style={styles.content}>
@@ -1274,7 +1188,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         </View>
       </View>
 
-      <AnimatedFlatList
+      <FlatList
         ref={listRef}
         data={timelineForList}
         keyExtractor={item => item.id}
@@ -1283,13 +1197,18 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
           styles.scrollContent,
           styles.historySection,
           styles.chatList,
+          {
+            paddingTop:
+              (isAppUser ? chatInputHeight : inviteBannerHeight) +
+              bottomButtonsHeight +
+              keyboardHeight +
+              spacing.sm,
+          },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="always"
         inverted
         renderItem={({item}) => renderTimelineItem(item)}
-        ListHeaderComponent={<Reanimated.View style={animatedKeyboardSpacerStyle} />}
-        ListFooterComponent={<View style={{height: spacing.md}} />}
         ListEmptyComponent={
           <View style={styles.emptyHistory}>
             <Icon name="receipt-outline" size={48} color="#D1D5DB" />
@@ -1299,8 +1218,9 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       />
 
       {/* Bottom Buttons */}
-      {!shouldHideActionButtons && (
-        <View style={[styles.bottomButtons, {paddingBottom: spacing.md + insets.bottom}]}>
+      <View
+        style={[styles.bottomButtons, {paddingBottom: spacing.md + insets.bottom}, {bottom: keyboardHeight}]}
+        onLayout={event => setBottomButtonsHeight(event.nativeEvent.layout.height)}>
         <TouchableOpacity
           style={[styles.actionButton, styles.paidButton]}
           onPress={() => openTransactionModal('paid')}>
@@ -1313,36 +1233,24 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
           <Icon name="arrow-down" size={20} color="#10B981" />
           <Text style={styles.getButtonText}>Get</Text>
         </TouchableOpacity>
-        </View>
-      )}
+      </View>
 
       {/* Chat Input (only if app user) */}
       {isAppUser && (
-        <Animated.View
-          style={[
-            styles.chatInputContainer,
-            {
-              paddingBottom: spacing.sm + insets.bottom,
-              transform: [{translateY: Animated.multiply(keyboardOffsetAnim, -1)}],
-            },
-          ]}>
+        <View
+          style={[styles.chatInputContainer, {bottom: keyboardHeight + bottomButtonsHeight}]}
+          onLayout={event => setChatInputHeight(event.nativeEvent.layout.height)}>
           <TextInput
             ref={chatInputRef}
             style={styles.chatInput}
             placeholder="Type a message..."
             value={messageText}
             onChangeText={setMessageText}
+            onBlur={() => setKeyboardHeight(0)}
             multiline
             blurOnSubmit={false}
             placeholderTextColor={colors.text.secondary}
             editable={true}
-            onTouchStart={() => {
-              setShouldHideActionButtons(true);
-            }}
-            onFocus={() => {
-              setShouldHideActionButtons(true);
-            }}
-            onBlur={() => setShouldHideActionButtons(false)}
           />
           <TouchableOpacity
             style={styles.sendButton}
@@ -1354,12 +1262,14 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
               color={messageText.trim() && !sendingMessage ? colors.primary : colors.text.light}
             />
           </TouchableOpacity>
-        </Animated.View>
+        </View>
       )}
 
       {/* Invite Banner (if not app user) */}
       {!isAppUser && !loadingChat && (
-        <View style={[styles.inviteBanner, {paddingBottom: spacing.md + insets.bottom}]}>
+        <View
+          style={[styles.inviteBanner, {bottom: bottomButtonsHeight + keyboardHeight}]}
+          onLayout={event => setInviteBannerHeight(event.nativeEvent.layout.height)}>
           <Text style={styles.inviteText}>
             Invite {getContactName()} to enable chat feature.
           </Text>
@@ -1851,7 +1761,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: spacing.md,
-    paddingBottom: spacing.md,
+    paddingBottom: 0,
   },
   contactCard: {
     backgroundColor: colors.white,
@@ -2026,6 +1936,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   chatInputContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: spacing.md,
@@ -2054,6 +1968,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   inviteBanner: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -2091,6 +2009,10 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   bottomButtons: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
@@ -2521,23 +2443,5 @@ const styles = StyleSheet.create({
 });
 
 export default LedgerContactDetailScreen;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

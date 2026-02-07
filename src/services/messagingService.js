@@ -4,6 +4,11 @@ import notifee from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { navigationRef } from '../navigation/AppNavigator';
 import { chatStore } from '../context/ChatStore';
+import {DeviceEventEmitter} from 'react-native';
+import {
+  initLedgerDatabase,
+  createTransaction as createLedgerTransaction,
+} from './ledgerDatabase';
 import {
   initChatDatabase,
   insertMessage,
@@ -22,6 +27,8 @@ const API_URL = 'https://account-android-app-backend.vercel.app/api';
 const incomingMessageListeners = new Set();
 
 const PENDING_CHAT_NAV_KEY = 'pendingChatNavigation';
+const LEDGER_CONTACTS_KEY = 'ledgerContacts';
+const PROCESSED_LEDGER_EVENTS_KEY = 'processedLedgerEvents:v1';
 
 /**
  * Get Firebase auth token
@@ -206,12 +213,139 @@ export const sendMessageToUser = async (receiverId, messageData) => {
 /**
  * Handle incoming FCM messages (foreground & background)
  */
+
+const readLedgerContacts = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(LEDGER_CONTACTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to read ledger contacts:', error);
+    return [];
+  }
+};
+
+const writeLedgerContacts = async contacts => {
+  try {
+    await AsyncStorage.setItem(LEDGER_CONTACTS_KEY, JSON.stringify(contacts));
+  } catch (error) {
+    console.error('Failed to write ledger contacts:', error);
+  }
+};
+
+const resolveLedgerContactRecordId = async (sourceUserId, sourceName = 'App User') => {
+  const contacts = await readLedgerContacts();
+  const sourceId = String(sourceUserId || '');
+  if (!sourceId) return null;
+
+  const existing = contacts.find(item => String(item?.userId || item?.firebaseUid || '') === sourceId);
+  if (existing?.recordID) {
+    return String(existing.recordID);
+  }
+
+  const recordID = 'app_' + sourceId;
+  contacts.push({
+    recordID,
+    displayName: sourceName || 'App User',
+    givenName: '',
+    familyName: '',
+    phoneNumbers: [],
+    isAppUser: 1,
+    userId: sourceId,
+  });
+  await writeLedgerContacts(contacts);
+  return recordID;
+};
+
+const wasLedgerEventProcessed = async idempotencyKey => {
+  try {
+    const raw = await AsyncStorage.getItem(PROCESSED_LEDGER_EVENTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return false;
+    return parsed.includes(idempotencyKey);
+  } catch {
+    return false;
+  }
+};
+
+const markLedgerEventProcessed = async idempotencyKey => {
+  try {
+    const raw = await AsyncStorage.getItem(PROCESSED_LEDGER_EVENTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(parsed) ? parsed : [];
+    if (!list.includes(idempotencyKey)) {
+      list.push(idempotencyKey);
+    }
+    const trimmed = list.slice(-500);
+    await AsyncStorage.setItem(PROCESSED_LEDGER_EVENTS_KEY, JSON.stringify(trimmed));
+  } catch (error) {
+    console.error('Failed to mark ledger event processed:', error);
+  }
+};
+
+const handleLedgerEvent = async data => {
+  const sourceUserId = String(data?.sourceUserId || data?.senderId || '');
+  const originTxnId = String(data?.originTxnId || data?.transactionId || '');
+  const op = String(data?.op || 'create');
+  const idempotencyKey = String(
+    data?.idempotencyKey || ('ledger:' + sourceUserId + ':' + originTxnId + ':' + op)
+  );
+
+  if (!sourceUserId || !originTxnId) {
+    return;
+  }
+
+  if (await wasLedgerEventProcessed(idempotencyKey)) {
+    return;
+  }
+
+  if (op !== 'create') {
+    await markLedgerEventProcessed(idempotencyKey);
+    return;
+  }
+
+  initLedgerDatabase();
+
+  const amount = Math.abs(Number(data?.amount || 0));
+  if (!amount) {
+    await markLedgerEventProcessed(idempotencyKey);
+    return;
+  }
+
+  const sourceType =
+    data?.entryType === 'get' || data?.transactionType === 'get' || data?.type === 'get'
+      ? 'get'
+      : 'paid';
+  const mirroredType = sourceType === 'paid' ? 'get' : 'paid';
+  const sourceName = data?.sourceUserName || data?.senderName || 'App User';
+  const contactRecordId = await resolveLedgerContactRecordId(sourceUserId, sourceName);
+
+  if (!contactRecordId) {
+    return;
+  }
+
+  createLedgerTransaction(contactRecordId, amount, mirroredType, String(data?.note || ''));
+  await markLedgerEventProcessed(idempotencyKey);
+
+  DeviceEventEmitter.emit('ledger:updated', {
+    contactRecordId,
+    sourceUserId,
+    originTxnId,
+    op,
+  });
+};
+
 export const handleIncomingMessage = async (remoteMessage) => {
   try {
     const {data} = remoteMessage;
 
     if (!data || !data.type) {
       console.log('Invalid message data');
+      return;
+    }
+
+    if (data.type === 'ledger_event') {
+      await handleLedgerEvent(data);
       return;
     }
 
@@ -604,3 +738,4 @@ export default {
   setupTokenRefreshListener,
   initMessagingService,
 };
+

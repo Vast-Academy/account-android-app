@@ -10,11 +10,11 @@ import {
   TextInput,
   Alert,
   Animated,
-  Easing,
   Keyboard,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   DeviceEventEmitter,
-  BackHandler,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -22,12 +22,6 @@ import {colors, spacing, fontSize, fontWeight} from '../utils/theme';
 import {useToast} from '../hooks/useToast';
 import {useCurrencySymbol} from '../hooks/useCurrencySymbol';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing as ReanimatedEasing,
-} from 'react-native-reanimated';
 import {
   initLedgerDatabase,
   createTransaction as createLedgerTransaction,
@@ -62,8 +56,6 @@ const LEDGER_PAID_DEFAULT_PREFIX = 'ledgerPaidDefault:';
 const LEDGER_PAID_DEFAULT_DEBIT = 'debit';
 const LEDGER_PAID_DEFAULT_RECORD = 'record';
 const LEDGER_CHAT_CACHE_PREFIX = 'ledgerChatCache:';
-
-const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
 const LedgerContactDetailScreen = ({route, navigation}) => {
   const {contact} = route.params || {};
@@ -108,11 +100,8 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
-  const keyboardOffsetAnim = useRef(new Animated.Value(0)).current;
-  const keyboardOffsetRef = useRef(0);
-  const lastKnownKeyboardHeightRef = useRef(320);
-  const [shouldHideActionButtons, setShouldHideActionButtons] = useState(false);
-  const keyboardListInset = useSharedValue(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const chatStoreState = useChatStore();
   const conversationVersion = chatStoreState.conversationVersion?.[conversationId] || 0;
 
@@ -124,19 +113,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   const amountInputRef = useRef(null);
   const noteInputRef = useRef(null);
   const chatInputRef = useRef(null);
-  const animateKeyboardOffset = (toValue, duration = 180) => {
-    keyboardOffsetRef.current = toValue;
-    keyboardOffsetAnim.stopAnimation();
-    Animated.timing(keyboardOffsetAnim, {
-      toValue,
-      duration,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  };
-  const animatedKeyboardSpacerStyle = useAnimatedStyle(() => ({
-    height: keyboardListInset.value,
-  }));
 
   useEffect(() => {
     if (optionsVisible) {
@@ -215,55 +191,21 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   }, [conversationId, conversationVersion, isAppUser]);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', event => {
-      const nextHeight = event?.endCoordinates?.height || lastKnownKeyboardHeightRef.current || 320;
-      lastKnownKeyboardHeightRef.current = nextHeight;
-      keyboardListInset.value = withTiming(nextHeight, {
-        duration: 190,
-        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
-      });
-      animateKeyboardOffset(nextHeight, 190);
-      setShouldHideActionButtons(true);
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToOffset?.({offset: 0, animated: false});
-      });
+    const showListener = Keyboard.addListener('keyboardDidShow', event => {
+      setIsKeyboardVisible(true);
+      setKeyboardHeight(event.endCoordinates?.height || 0);
     });
-
-    const willHideSub = Keyboard.addListener('keyboardWillHide', () => {
-      setShouldHideActionButtons(false);
+    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+      setKeyboardHeight(0);
     });
-
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      setShouldHideActionButtons(false);
-      keyboardListInset.value = withTiming(0, {
-        duration: 180,
-        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
-      });
-      animateKeyboardOffset(0, 180);
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToOffset?.({offset: 0, animated: false});
-      });
-    });
-
     return () => {
-      showSub.remove();
-      willHideSub.remove();
-      hideSub.remove();
+      showListener.remove();
+      hideListener.remove();
     };
-  }, [keyboardOffsetAnim]);
-
-  useEffect(() => {
-    const backSub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (chatInputRef.current?.isFocused?.()) {
-        setShouldHideActionButtons(false);
-        Keyboard.dismiss();
-        return true;
-      }
-      return false;
-    });
-
-    return () => backSub.remove();
   }, []);
+
+
 
   useEffect(() => {
     const loadGetDefault = async () => {
@@ -1223,7 +1165,11 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      enabled={Platform.OS === 'ios'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}>
       <View style={styles.content}>
       {/* Header + Totals */}
       <View style={styles.headerBlock}>
@@ -1274,7 +1220,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         </View>
       </View>
 
-      <AnimatedFlatList
+      <FlatList
         ref={listRef}
         data={timelineForList}
         keyExtractor={item => item.id}
@@ -1288,7 +1234,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         keyboardShouldPersistTaps="always"
         inverted
         renderItem={({item}) => renderTimelineItem(item)}
-        ListHeaderComponent={<Reanimated.View style={animatedKeyboardSpacerStyle} />}
         ListFooterComponent={<View style={{height: spacing.md}} />}
         ListEmptyComponent={
           <View style={styles.emptyHistory}>
@@ -1299,7 +1244,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
       />
 
       {/* Bottom Buttons */}
-      {!shouldHideActionButtons && (
+      {!isKeyboardVisible && (
         <View style={[styles.bottomButtons, {paddingBottom: spacing.md + insets.bottom}]}>
         <TouchableOpacity
           style={[styles.actionButton, styles.paidButton]}
@@ -1318,14 +1263,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
 
       {/* Chat Input (only if app user) */}
       {isAppUser && (
-        <Animated.View
-          style={[
-            styles.chatInputContainer,
-            {
-              paddingBottom: spacing.sm + insets.bottom,
-              transform: [{translateY: Animated.multiply(keyboardOffsetAnim, -1)}],
-            },
-          ]}>
+        <View style={[styles.chatInputContainer, {paddingBottom: spacing.sm + insets.bottom + (Platform.OS === 'android' ? keyboardHeight : 0)}]}>
           <TextInput
             ref={chatInputRef}
             style={styles.chatInput}
@@ -1336,13 +1274,6 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
             blurOnSubmit={false}
             placeholderTextColor={colors.text.secondary}
             editable={true}
-            onTouchStart={() => {
-              setShouldHideActionButtons(true);
-            }}
-            onFocus={() => {
-              setShouldHideActionButtons(true);
-            }}
-            onBlur={() => setShouldHideActionButtons(false)}
           />
           <TouchableOpacity
             style={styles.sendButton}
@@ -1354,7 +1285,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
               color={messageText.trim() && !sendingMessage ? colors.primary : colors.text.light}
             />
           </TouchableOpacity>
-        </Animated.View>
+        </View>
       )}
 
       {/* Invite Banner (if not app user) */}
@@ -1807,7 +1738,7 @@ const LedgerContactDetailScreen = ({route, navigation}) => {
         </View>
       </Modal>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -2521,23 +2452,5 @@ const styles = StyleSheet.create({
 });
 
 export default LedgerContactDetailScreen;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

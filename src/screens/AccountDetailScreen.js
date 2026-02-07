@@ -2218,7 +2218,7 @@ const AccountDetailScreen = ({route, navigation}) => {
                 initialEntryDate: entryDate.toISOString(),
               });
             }}>
-            <Text style={styles.earningSecondaryTextDark}>Add Ammount</Text>
+            <Text style={styles.earningSecondaryTextDark}>Add Amount</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -4034,4 +4034,5 @@ const styles = StyleSheet.create({
 });
 
 export default AccountDetailScreen;
+
 
